@@ -6,4 +6,4 @@ __pycache__/
 node_modules/
 coverage/
 apps/api/data/
-
+.superpowers/
