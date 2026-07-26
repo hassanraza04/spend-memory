@@ -6,6 +6,46 @@ from pathlib import Path
 
 from sample_data.generator.generate import DEFAULT_SEED, generate_dataset
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_fixed_seed_regeneration_matches_committed_dataset_artifacts(tmp_path) -> None:
+    generate_dataset(tmp_path, seed=DEFAULT_SEED)
+
+    for generated_path, committed_path in (
+        (tmp_path / "expected/canonical_ledger.json", "sample_data/expected/canonical_ledger.json"),
+        (tmp_path / "expected/reconciliation.json", "sample_data/expected/reconciliation.json"),
+        (tmp_path / "source/aed_january_2026.csv", "sample_data/source/aed_january_2026.csv"),
+        (tmp_path / "source/aed_statement_tabular.pdf", "sample_data/source/aed_statement_tabular.pdf"),
+        (tmp_path / "source/pkr_statement_compact.pdf", "sample_data/source/pkr_statement_compact.pdf"),
+    ):
+        assert generated_path.read_bytes() == (REPOSITORY_ROOT / committed_path).read_bytes()
+
+
+def test_docker_context_excludes_sensitive_and_bulky_local_paths() -> None:
+    ignored_paths = {
+        line.strip()
+        for line in (REPOSITORY_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+    assert {
+        ".env",
+        ".git/",
+        ".venv/",
+        "node_modules/",
+        ".pytest_cache/",
+        "apps/api/data/",
+        ".superpowers/",
+    } <= ignored_paths
+    assert "sample_data/" not in ignored_paths
+
+
+def test_make_lint_checks_api_and_sample_data() -> None:
+    makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "uv run ruff check apps/api sample_data" in makefile
+
 
 def test_fixed_seed_generates_the_same_canonical_ledger_and_sources(tmp_path) -> None:
     first = generate_dataset(tmp_path / "first", seed=DEFAULT_SEED)
