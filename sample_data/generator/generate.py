@@ -171,7 +171,7 @@ def _write_aed_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
 def _write_pkr_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
     canvas = Canvas(str(path), pagesize=letter, invariant=1)
     width, height = letter
-    y = height - 42
+    y = height - 60
     canvas.setFillColorRGB(0, 0.18, 0.34)
     canvas.rect(0, height - 58, width, 58, fill=1, stroke=0)
     canvas.setFillColorRGB(1, 1, 1)

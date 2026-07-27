@@ -4,6 +4,8 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
+import fitz
+
 from sample_data.generator.generate import DEFAULT_SEED, generate_dataset
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +22,22 @@ def test_fixed_seed_regeneration_matches_committed_dataset_artifacts(tmp_path) -
         (tmp_path / "source/pkr_statement_compact.pdf", "sample_data/source/pkr_statement_compact.pdf"),
     ):
         assert generated_path.read_bytes() == (REPOSITORY_ROOT / committed_path).read_bytes()
+
+
+def test_pkr_first_activity_row_starts_below_header_banner(tmp_path) -> None:
+    generate_dataset(tmp_path, seed=DEFAULT_SEED)
+
+    with fitz.open(tmp_path / "source/pkr_statement_compact.pdf") as document:
+        first_page = document[0]
+        activity_spans = [
+            span
+            for block in first_page.get_text("dict")["blocks"]
+            for line in block.get("lines", [])
+            for span in line["spans"]
+            if span["text"] != "SYNTHETIC PKR ACTIVITY"
+        ]
+
+    assert min(span["bbox"][1] for span in activity_spans) >= 58
 
 
 def test_docker_context_excludes_sensitive_and_bulky_local_paths() -> None:
