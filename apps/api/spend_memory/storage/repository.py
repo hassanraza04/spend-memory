@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock
 from uuid import UUID, uuid4
+from weakref import WeakValueDictionary
 
 import duckdb
 import fitz
@@ -27,6 +31,19 @@ class ImportLimits:
 
 
 DEFAULT_IMPORT_LIMITS = ImportLimits()
+_IMPORT_GATES = WeakValueDictionary()
+_IMPORT_GATES_LOCK = Lock()
+
+
+@contextmanager
+def _import_gate(key: tuple[str, str, str, str]) -> Iterator[None]:
+    with _IMPORT_GATES_LOCK:
+        gate = _IMPORT_GATES.get(key)
+        if gate is None:
+            gate = Lock()
+            _IMPORT_GATES[key] = gate
+    with gate:
+        yield
 
 
 class ImportRepositoryError(Exception):
@@ -35,11 +52,15 @@ class ImportRepositoryError(Exception):
         super().__init__(code)
 
 
-def apply_migrations(database_path: Path) -> None:
+def apply_migrations(
+    database_path: Path,
+    *,
+    migration_directory: Path | None = None,
+) -> None:
     """Apply each bundled migration once in one transaction."""
     database_path.parent.mkdir(parents=True, exist_ok=True)
     storage_directory = Path(__file__).parent
-    migration_directory = storage_directory / "migrations"
+    migration_directory = migration_directory or storage_directory / "migrations"
 
     with duckdb.connect(str(database_path)) as connection:
         connection.execute("BEGIN TRANSACTION")
@@ -113,7 +134,35 @@ class ImportRepository:
         document_sha256 = sha256(document).hexdigest()
         storage_filename = f"{document_sha256}{_extension_for(declared_mime_type)}"
         final_path = self.data_directory / storage_filename
+        import_key = (
+            str(self.database_path.resolve()),
+            document_sha256,
+            parser.parser_id,
+            parser.version,
+        )
 
+        with _import_gate(import_key):
+            return self._import_validated_document(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser=parser,
+                document_sha256=document_sha256,
+                storage_filename=storage_filename,
+                final_path=final_path,
+            )
+
+    def _import_validated_document(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser: StatementParser,
+        document_sha256: str,
+        storage_filename: str,
+        final_path: Path,
+    ) -> ImportResult:
         with duckdb.connect(str(self.database_path)) as connection:
             existing = connection.execute(
                 """
@@ -161,7 +210,7 @@ class ImportRepository:
                 code="storage_failed",
             )
             raise ImportRepositoryError("storage_failed") from None
-        created_final_file = False
+        remove_final_file_on_failure = False
 
         try:
             with duckdb.connect(str(self.database_path)) as connection:
@@ -270,14 +319,14 @@ class ImportRepository:
                         )
 
                     if not final_path.exists():
+                        remove_final_file_on_failure = True
                         os.replace(staged_path, final_path)
-                        created_final_file = True
                     connection.execute("COMMIT")
                 except BaseException:
                     connection.execute("ROLLBACK")
                     raise
         except BaseException as error:
-            if created_final_file:
+            if remove_final_file_on_failure:
                 final_path.unlink(missing_ok=True)
             if not isinstance(error, Exception):
                 raise

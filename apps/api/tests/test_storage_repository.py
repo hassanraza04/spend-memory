@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
+from threading import Event, Lock
 
 import duckdb
 import fitz
@@ -56,6 +58,27 @@ class FailingParser(StubParser):
         raise RuntimeError("SENSITIVE-STATEMENT-DETAIL")
 
 
+class ConcurrentParser(StubParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_parse_entered = Event()
+        self.second_parse_entered = Event()
+        self.release_first_parse = Event()
+        self._parse_call_lock = Lock()
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        with self._parse_call_lock:
+            self.parse_calls += 1
+            call_number = self.parse_calls
+        if call_number == 1:
+            self.first_parse_entered.set()
+            if not self.release_first_parse.wait(timeout=5):
+                raise RuntimeError("concurrency test did not release parser")
+        else:
+            self.second_parse_entered.set()
+        return self._transactions
+
+
 def _repository_module():
     try:
         return importlib.import_module("spend_memory.storage.repository")
@@ -99,6 +122,44 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         "raw_transactions",
         "import_errors",
     } <= tables
+
+
+def test_failed_migration_rolls_back_schema_and_migration_ledger(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    migration_directory = tmp_path / "migrations"
+    migration_directory.mkdir()
+    (migration_directory / "0002_create_probe.sql").write_text(
+        "CREATE TABLE migration_probe (id INTEGER);",
+        encoding="utf-8",
+    )
+    (migration_directory / "0003_invalid.sql").write_text(
+        "CREATE TABLE broken_migration (",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(duckdb.ParserException):
+        repository.apply_migrations(
+            database_path,
+            migration_directory=migration_directory,
+        )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'main'
+                """
+            ).fetchall()
+        }
+
+    assert "migration_probe" not in tables
+    assert "storage_migrations" not in tables
 
 
 def test_source_document_identity_is_the_sha256_of_original_bytes(
@@ -175,6 +236,48 @@ def test_same_document_and_parser_version_is_idempotent(tmp_path: Path) -> None:
     assert parser.parse_calls == 1
     assert counts == (1, 1, 1)
     assert active_runs == [(first.run_id,)]
+
+
+def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+    parser = ConcurrentParser()
+
+    def import_statement():
+        return store.import_document(
+            document=CSV_DOCUMENT,
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+            parser=parser,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(import_statement)
+        assert parser.first_parse_entered.wait(timeout=5)
+        second_future = executor.submit(import_statement)
+        parser.second_parse_entered.wait(timeout=1)
+        parser.release_first_parse.set()
+        results = [first_future.result(), second_future.result()]
+
+    with duckdb.connect(str(store.database_path), read_only=True) as connection:
+        counts = connection.execute(
+            """
+            SELECT
+                (SELECT count(*) FROM source_documents),
+                (SELECT count(*) FROM import_runs),
+                (SELECT count(*) FROM raw_transactions),
+                (SELECT count(*) FROM import_errors)
+            """
+        ).fetchone()
+
+    assert parser.parse_calls == 1
+    assert results[0].document_id == results[1].document_id
+    assert results[0].run_id == results[1].run_id
+    assert sorted(result.was_already_imported for result in results) == [False, True]
+    assert counts == (1, 1, 1, 0)
 
 
 def test_new_parser_version_reprocesses_and_is_the_only_active_run(
@@ -467,6 +570,61 @@ def test_storage_failure_rolls_back_database_rows_and_source_file(
     assert caught.value.__cause__ is None
     assert counts == (0, 0, 0, 1)
     assert error_type == ("storage_failed",)
+    assert list(store.data_directory.iterdir()) == []
+
+
+def test_failure_after_final_file_move_removes_rows_and_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+    final_path = (
+        store.data_directory / f"{sha256(CSV_DOCUMENT).hexdigest()}.csv"
+    )
+    real_replace = repository.os.replace
+    moved_paths: list[Path] = []
+
+    def move_then_fail(source: Path, destination: Path) -> None:
+        real_replace(source, destination)
+        moved_paths.append(Path(destination))
+        raise OSError("SENSITIVE-AFTER-FINAL-MOVE")
+
+    monkeypatch.setattr(repository.os, "replace", move_then_fail)
+
+    with pytest.raises(repository.ImportRepositoryError) as caught:
+        store.import_document(
+            document=CSV_DOCUMENT,
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+            parser=StubParser(),
+        )
+
+    with duckdb.connect(str(store.database_path), read_only=True) as connection:
+        counts = connection.execute(
+            """
+            SELECT
+                (SELECT count(*) FROM source_documents),
+                (SELECT count(*) FROM import_runs),
+                (SELECT count(*) FROM raw_transactions),
+                (SELECT count(*) FROM import_errors)
+            """
+        ).fetchone()
+        stored_error = connection.execute(
+            "SELECT error_type, error_message FROM import_errors"
+        ).fetchone()
+
+    assert moved_paths == [final_path]
+    assert caught.value.code == "storage_failed"
+    assert str(caught.value) == "storage_failed"
+    assert caught.value.__cause__ is None
+    assert "SENSITIVE-AFTER-FINAL-MOVE" not in str(caught.value)
+    assert counts == (0, 0, 0, 1)
+    assert stored_error == ("storage_failed", "storage_failed")
+    assert not final_path.exists()
     assert list(store.data_directory.iterdir()) == []
 
 
