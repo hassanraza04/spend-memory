@@ -14,7 +14,7 @@ _AMOUNT = re.compile(r"PKR (-?(?:0|[1-9]\d*))\Z")
 
 class SyntheticPkrCompactPdfParser:
     parser_id = "synthetic-pkr-compact-pdf"
-    version = "1.0"
+    version = "1.1"
 
     def can_parse(self, document: bytes, filename: str) -> float:
         if not filename.lower().endswith(".pdf"):
@@ -81,6 +81,7 @@ class SyntheticPkrCompactPdfParser:
             source_page=page_number,
             source_row=source_row,
             source_text=f"{description_text}\n{date_text}\n{amount_line}",
+            extraction_method="embedded_text",
             raw_account_identity="PKR-SYNTH-001",
         )
 

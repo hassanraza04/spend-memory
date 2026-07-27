@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from math import ceil
 from time import monotonic
 
 import fitz
@@ -59,46 +60,75 @@ def _has_usable_text(text: str) -> bool:
     return sum(character.isalnum() for character in text) >= 3
 
 
+def _remaining_seconds(deadline: float) -> float:
+    remaining_seconds = deadline - monotonic()
+    if remaining_seconds <= 0:
+        raise OcrError(OcrErrorCode.TIMEOUT)
+    return remaining_seconds
+
+
+def _rendered_dimensions(page: fitz.Page, render_dpi: int) -> tuple[int, int]:
+    scale = render_dpi / 72
+    return ceil(page.rect.width * scale), ceil(page.rect.height * scale)
+
+
+def _enforce_image_limits(width: int, height: int, limits: OcrLimits) -> None:
+    if width > limits.max_image_width or height > limits.max_image_height:
+        raise OcrError(OcrErrorCode.IMAGE_DIMENSIONS)
+    if width * height > limits.max_image_pixels:
+        raise OcrError(OcrErrorCode.IMAGE_PIXELS)
+
+
 def extract_pdf_page_text(
     document: bytes,
     *,
     limits: OcrLimits = DEFAULT_OCR_LIMITS,
     runner: OcrRunner | None = None,
 ) -> PdfPageTextResult:
+    deadline = monotonic() + limits.timeout_seconds
     try:
         with fitz.open(stream=document, filetype="pdf") as pdf:
+            _remaining_seconds(deadline)
             if pdf.needs_pass or not pdf.page_count:
                 raise OcrError(OcrErrorCode.MALFORMED_PDF)
-            page_text = [page.get_text() for page in pdf]
+            if pdf.page_count > limits.max_pages:
+                raise OcrError(OcrErrorCode.PAGE_LIMIT)
+
+            for page_index in range(pdf.page_count):
+                _remaining_seconds(deadline)
+                width, height = _rendered_dimensions(
+                    pdf[page_index], limits.render_dpi
+                )
+                _enforce_image_limits(width, height, limits)
+                _remaining_seconds(deadline)
+
+            page_text: list[str] = []
+            for page_index in range(pdf.page_count):
+                _remaining_seconds(deadline)
+                page_text.append(pdf[page_index].get_text())
+                _remaining_seconds(deadline)
             textless_pages = [
                 index for index, text in enumerate(page_text) if not _has_usable_text(text)
             ]
             if not textless_pages:
                 return PdfPageTextResult(tuple(page_text), ())
-            if pdf.page_count > limits.max_pages:
-                raise OcrError(OcrErrorCode.PAGE_LIMIT)
 
             ocr_pages: list[OcrPageText] = []
             ocr_runner = runner or run_tesseract
-            deadline = monotonic() + limits.timeout_seconds
             for page_index in textless_pages:
+                _remaining_seconds(deadline)
                 pixmap = pdf[page_index].get_pixmap(
                     dpi=limits.render_dpi,
                     colorspace=fitz.csGRAY,
                     alpha=False,
                     annots=False,
                 )
-                if (
-                    pixmap.width > limits.max_image_width
-                    or pixmap.height > limits.max_image_height
-                ):
-                    raise OcrError(OcrErrorCode.IMAGE_DIMENSIONS)
-                if pixmap.width * pixmap.height > limits.max_image_pixels:
-                    raise OcrError(OcrErrorCode.IMAGE_PIXELS)
-                remaining_seconds = deadline - monotonic()
-                if remaining_seconds <= 0:
-                    raise OcrError(OcrErrorCode.TIMEOUT)
-                text = ocr_runner(pixmap.tobytes("png"), remaining_seconds)
+                _remaining_seconds(deadline)
+                _enforce_image_limits(pixmap.width, pixmap.height, limits)
+                image = pixmap.tobytes("png")
+                remaining_seconds = _remaining_seconds(deadline)
+                text = ocr_runner(image, remaining_seconds)
+                _remaining_seconds(deadline)
                 page_text[page_index] = text
                 ocr_pages.append(OcrPageText(page_number=page_index + 1, text=text))
     except OcrError:

@@ -9,6 +9,7 @@ import fitz
 import pytest
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
+from spend_memory.ingestion import ocr
 from spend_memory.ingestion.ocr import (
     OcrError,
     OcrErrorCode,
@@ -76,13 +77,24 @@ def test_only_textless_pages_use_tesseract_and_ocr_text_is_separate() -> None:
     assert sha256(original).hexdigest() == original_hash
 
 
-def test_ocr_rejects_documents_over_the_page_limit_before_running_tesseract() -> None:
+def test_ocr_rejects_page_limit_before_text_extraction_or_rendering(monkeypatch) -> None:
     called = False
 
     def runner(image: bytes, timeout: float) -> str:
         nonlocal called
         called = True
         return ""
+
+    monkeypatch.setattr(
+        fitz.Page,
+        "get_text",
+        lambda self: pytest.fail("Text extraction must not run"),
+    )
+    monkeypatch.setattr(
+        fitz.Page,
+        "get_pixmap",
+        lambda self, **kwargs: pytest.fail("Rendering must not run"),
+    )
 
     with pytest.raises(OcrError) as caught:
         extract_pdf_page_text(
@@ -94,6 +106,80 @@ def test_ocr_rejects_documents_over_the_page_limit_before_running_tesseract() ->
     assert caught.value.code is OcrErrorCode.PAGE_LIMIT
     assert str(caught.value) == "ocr_page_limit"
     assert called is False
+
+
+def test_ocr_rejects_over_limit_geometry_before_text_extraction_or_rendering(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        fitz.Page,
+        "get_text",
+        lambda self: pytest.fail("Text extraction must not run"),
+    )
+    monkeypatch.setattr(
+        fitz.Page,
+        "get_pixmap",
+        lambda self, **kwargs: pytest.fail("Rendering must not run"),
+    )
+
+    with pytest.raises(OcrError) as caught:
+        extract_pdf_page_text(
+            _blank_pdf(width=1_000, height=1_000),
+            limits=OcrLimits(render_dpi=144, max_image_width=1_999),
+            runner=lambda image, timeout: pytest.fail("Tesseract must not run"),
+        )
+
+    assert caught.value.code is OcrErrorCode.IMAGE_DIMENSIONS
+
+
+def test_ocr_deadline_covers_embedded_text_extraction(monkeypatch) -> None:
+    current_time = [0.0]
+    original_get_text = fitz.Page.get_text
+
+    def slow_get_text(page: fitz.Page) -> str:
+        text = original_get_text(page)
+        current_time[0] = 2.0
+        return text
+
+    monkeypatch.setattr(ocr, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(fitz.Page, "get_text", slow_get_text)
+    monkeypatch.setattr(
+        fitz.Page,
+        "get_pixmap",
+        lambda self, **kwargs: pytest.fail("Rendering must not run after timeout"),
+    )
+
+    with pytest.raises(OcrError) as caught:
+        extract_pdf_page_text(
+            _text_pdf("page has usable text"),
+            limits=OcrLimits(timeout_seconds=1.0),
+        )
+
+    assert caught.value.code is OcrErrorCode.TIMEOUT
+
+
+def test_ocr_deadline_covers_page_rendering(monkeypatch) -> None:
+    current_time = [0.0]
+    original_get_pixmap = fitz.Page.get_pixmap
+
+    def slow_get_pixmap(page: fitz.Page, **kwargs):
+        pixmap = original_get_pixmap(page, **kwargs)
+        current_time[0] = 2.0
+        return pixmap
+
+    monkeypatch.setattr(ocr, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(fitz.Page, "get_pixmap", slow_get_pixmap)
+
+    with pytest.raises(OcrError) as caught:
+        extract_pdf_page_text(
+            _blank_pdf(),
+            limits=OcrLimits(timeout_seconds=1.0),
+            runner=lambda image, timeout: pytest.fail(
+                "Tesseract must not run after render timeout"
+            ),
+        )
+
+    assert caught.value.code is OcrErrorCode.TIMEOUT
 
 
 @pytest.mark.parametrize(
@@ -229,8 +315,39 @@ def test_registry_selects_the_synthetic_parser_for_its_image_only_fixture() -> N
     assert selected.parser_id == "synthetic-aed-tabular-pdf"
 
 
+def test_registry_selection_then_parse_invokes_tesseract_once(monkeypatch) -> None:
+    invocations = 0
+    original_run_tesseract = ocr.run_tesseract
+
+    def counting_run_tesseract(image: bytes, timeout_seconds: float) -> str:
+        nonlocal invocations
+        invocations += 1
+        return original_run_tesseract(image, timeout_seconds)
+
+    monkeypatch.setattr(ocr, "run_tesseract", counting_run_tesseract)
+    registry = ParserRegistry([SyntheticAedTabularPdfParser()])
+
+    transactions = registry.parse(
+        IMAGE_ONLY_FIXTURE.read_bytes(),
+        IMAGE_ONLY_FIXTURE.name,
+    )
+
+    assert len(transactions) == 1
+    assert invocations == 1
+
+
 def test_api_container_installs_the_free_local_tesseract_package() -> None:
     dockerfile = (REPOSITORY_ROOT / "apps/api/Dockerfile").read_text(encoding="utf-8")
 
     assert "apt-get install -y --no-install-recommends tesseract-ocr" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
+
+
+def test_ci_installs_tesseract_before_running_the_real_ocr_test() -> None:
+    workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "sudo apt-get update" in workflow
+    assert "sudo apt-get install --yes tesseract-ocr" in workflow
+    assert workflow.index("sudo apt-get install --yes tesseract-ocr") < workflow.index(
+        "make test"
+    )

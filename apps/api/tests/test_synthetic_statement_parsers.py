@@ -86,6 +86,12 @@ def test_collective_parser_output_matches_the_expected_ledger() -> None:
     assert len(parsed) == len(expected)
 
 
+def test_parser_versions_mark_the_explicit_provenance_contract() -> None:
+    assert CanonicalCsvParser.version == "1.1"
+    assert SyntheticAedTabularPdfParser.version == "1.1"
+    assert SyntheticPkrCompactPdfParser.version == "1.1"
+
+
 def test_each_parser_preserves_format_metadata_and_lineage() -> None:
     csv_transaction = CanonicalCsvParser().parse(
         (SOURCE_DIRECTORY / "aed_january_2026.csv").read_bytes()
@@ -103,9 +109,12 @@ def test_each_parser_preserves_format_metadata_and_lineage() -> None:
         "SYN-00835,2026-01-01,AED-SYNTH-001,AED,-10847,BREW-LAB,debit"
     )
     assert csv_transaction.extraction_confidence == 1.0
+    assert csv_transaction.extraction_method == "delimited_text"
 
     assert pkr_transaction.amount_text == "PKR -182338"
     assert pkr_transaction.currency_text == "PKR"
+    assert pkr_transaction.extraction_method == "embedded_text"
+    assert aed_transaction.extraction_method == "embedded_text"
 
     for transaction, currency, account in (
         (aed_transaction, "AED", "AED-SYNTH-001"),

@@ -22,7 +22,7 @@ _AMOUNT = re.compile(r"-?(?:0|[1-9]\d*)\Z")
 
 class CanonicalCsvParser:
     parser_id = "canonical-csv"
-    version = "1.0"
+    version = "1.1"
 
     def can_parse(self, document: bytes, filename: str) -> float:
         return 0.9 if filename.lower().endswith(".csv") else 0.0
@@ -82,6 +82,7 @@ class CanonicalCsvParser:
             source_page=None,
             source_row=source_row,
             source_text=source_text,
+            extraction_method="delimited_text",
             raw_account_identity=account_id,
         )
 

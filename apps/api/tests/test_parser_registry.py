@@ -114,8 +114,22 @@ def test_parser_output_is_immutable_and_retains_source_amount_text() -> None:
         raw_account_reference="001",
         raw_balance_text="AED 88.20",
         extraction_confidence=0.95,
+        extraction_method="embedded_text",
     )
 
     assert parsed.amount_text == "- AED 12.50"
     with pytest.raises(FrozenInstanceError):
         parsed.amount_text = "AED 12.50"  # type: ignore[misc]
+
+
+def test_parser_output_requires_explicit_extraction_method() -> None:
+    with pytest.raises(TypeError):
+        ParsedRawTransaction(  # type: ignore[call-arg]
+            date_text="2026-01-02",
+            description_text="Coffee shop",
+            amount_text="-1250",
+            currency_text="AED",
+            source_page=1,
+            source_row=7,
+            source_text="2026-01-02 Coffee shop -1250",
+        )

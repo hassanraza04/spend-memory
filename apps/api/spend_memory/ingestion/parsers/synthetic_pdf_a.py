@@ -21,23 +21,19 @@ _IMAGE_ONLY_FIXTURE_NAME = "aed_statement_image_only.pdf"
 
 class SyntheticAedTabularPdfParser:
     parser_id = "synthetic-aed-tabular-pdf"
-    version = "1.0"
+    version = "1.1"
 
     def can_parse(self, document: bytes, filename: str) -> float:
         if not filename.lower().endswith(".pdf"):
             return 0.0
+        fixture_name = filename.replace("\\", "/").rsplit("/", 1)[-1].lower()
         try:
             with fitz.open(stream=document, filetype="pdf") as pdf:
                 if not pdf.page_count:
                     return 0.0
                 if _TITLE in pdf[0].get_text():
                     return 1.0
-            if filename.replace("\\", "/").rsplit("/", 1)[-1].lower() != (
-                _IMAGE_ONLY_FIXTURE_NAME
-            ):
-                return 0.0
-            extracted = extract_pdf_page_text(document)
-            return 1.0 if _TITLE in extracted.page_text[0] else 0.0
+                return 1.0 if fixture_name == _IMAGE_ONLY_FIXTURE_NAME else 0.0
         except (OcrError, fitz.FileDataError, RuntimeError, ValueError):
             return 0.0
 

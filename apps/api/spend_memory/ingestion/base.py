@@ -15,11 +15,11 @@ class ParsedRawTransaction:
     source_page: int | None
     source_row: int | None
     source_text: str | None
+    extraction_method: str
     raw_account_identity: str | None = None
     raw_account_reference: str | None = None
     raw_balance_text: str | None = None
     extraction_confidence: float = 1.0
-    extraction_method: str = "embedded_text"
 
 
 class StatementParser(Protocol):
