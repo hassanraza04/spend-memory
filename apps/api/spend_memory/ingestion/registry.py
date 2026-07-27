@@ -33,8 +33,8 @@ class ParserRegistry:
             ]
         except StatementParserError:
             raise
-        except Exception as error:
-            raise StatementParserError(ParserErrorCode.MALFORMED) from error
+        except Exception:  # noqa: BLE001
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None
         compatible = [(confidence, parser) for confidence, parser in candidates if confidence > 0]
         if not compatible:
             raise StatementParserError(ParserErrorCode.UNSUPPORTED)
@@ -51,5 +51,5 @@ class ParserRegistry:
             return self.select(document, filename).parse(document)
         except StatementParserError:
             raise
-        except Exception as error:
-            raise StatementParserError(ParserErrorCode.MALFORMED) from error
+        except Exception:  # noqa: BLE001
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None

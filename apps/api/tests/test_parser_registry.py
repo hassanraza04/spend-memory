@@ -69,7 +69,7 @@ def test_registry_preserves_declared_encrypted_document_errors() -> None:
 
 class _BrokenParser(_Parser):
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
-        raise ValueError("untrusted parser detail")
+        raise ValueError("SENSITIVE-STATEMENT-DETAIL")
 
 
 def test_registry_maps_unexpected_parser_exceptions_to_safe_malformed_errors() -> None:
@@ -80,11 +80,13 @@ def test_registry_maps_unexpected_parser_exceptions_to_safe_malformed_errors() -
 
     assert caught.value.code is ParserErrorCode.MALFORMED
     assert str(caught.value) == "malformed"
+    assert "SENSITIVE-STATEMENT-DETAIL" not in str(caught.value)
+    assert caught.value.__cause__ is None
 
 
 class _BrokenDetector(_Parser):
     def can_parse(self, document: bytes, filename: str) -> float:
-        raise RuntimeError("untrusted detector detail")
+        raise RuntimeError("SENSITIVE-STATEMENT-DETAIL")
 
 
 def test_registry_maps_unexpected_detector_exceptions_to_safe_malformed_errors() -> None:
@@ -95,6 +97,8 @@ def test_registry_maps_unexpected_detector_exceptions_to_safe_malformed_errors()
 
     assert caught.value.code is ParserErrorCode.MALFORMED
     assert str(caught.value) == "malformed"
+    assert "SENSITIVE-STATEMENT-DETAIL" not in str(caught.value)
+    assert caught.value.__cause__ is None
 
 
 def test_parser_output_is_immutable_and_retains_source_amount_text() -> None:
