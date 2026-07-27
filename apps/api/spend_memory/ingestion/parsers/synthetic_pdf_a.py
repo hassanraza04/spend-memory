@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import re
+from datetime import date
+
+import fitz
+
+from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.registry import ParserErrorCode, StatementParserError
+
+_TITLE = "SYNTHETIC AED STATEMENT | TABULAR LAYOUT"
+_HEADER = ("Date", "Description", "Amount (fils)")
+_AMOUNT = re.compile(r"-?(?:0|[1-9]\d*)\Z")
+
+
+class SyntheticAedTabularPdfParser:
+    parser_id = "synthetic-aed-tabular-pdf"
+    version = "1.0"
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        if not filename.lower().endswith(".pdf"):
+            return 0.0
+        try:
+            with fitz.open(stream=document, filetype="pdf") as pdf:
+                return 1.0 if pdf.page_count and _TITLE in pdf[0].get_text() else 0.0
+        except (fitz.FileDataError, RuntimeError, ValueError):
+            return 0.0
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        try:
+            with fitz.open(stream=document, filetype="pdf") as pdf:
+                if pdf.needs_pass or not pdf.page_count or _TITLE not in pdf[0].get_text():
+                    raise StatementParserError(ParserErrorCode.MALFORMED)
+                transactions = [
+                    transaction
+                    for page_number, page in enumerate(pdf, start=1)
+                    for transaction in self._parse_page(page.get_text().splitlines(), page_number)
+                ]
+        except StatementParserError:
+            raise
+        except (fitz.FileDataError, RuntimeError, ValueError):
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None
+        if not transactions:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        return transactions
+
+    @staticmethod
+    def _parse_page(lines: list[str], page_number: int) -> list[ParsedRawTransaction]:
+        if page_number == 1 and (not lines or lines.pop(0) != _TITLE):
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        if tuple(lines[:3]) != _HEADER:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        rows = lines[3:]
+        if not rows or len(rows) % 3:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        return [
+            SyntheticAedTabularPdfParser._transaction(
+                date_text=rows[index],
+                description_text=rows[index + 1],
+                amount_text=rows[index + 2],
+                page_number=page_number,
+                source_row=index // 3 + 1,
+            )
+            for index in range(0, len(rows), 3)
+        ]
+
+    @staticmethod
+    def _transaction(
+        *,
+        date_text: str,
+        description_text: str,
+        amount_text: str,
+        page_number: int,
+        source_row: int,
+    ) -> ParsedRawTransaction:
+        _validate_date(date_text)
+        if not description_text or not _AMOUNT.fullmatch(amount_text) or int(amount_text) == 0:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        return ParsedRawTransaction(
+            date_text=date_text,
+            description_text=description_text,
+            amount_text=amount_text,
+            currency_text="AED",
+            source_page=page_number,
+            source_row=source_row,
+            source_text=f"{date_text}\n{description_text}\n{amount_text}",
+            raw_account_identity="AED-SYNTH-001",
+        )
+
+
+def _validate_date(date_text: str) -> None:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_text):
+        raise StatementParserError(ParserErrorCode.MALFORMED)
+    try:
+        date.fromisoformat(date_text)
+    except ValueError:
+        raise StatementParserError(ParserErrorCode.MALFORMED) from None
