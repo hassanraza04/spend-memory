@@ -19,6 +19,10 @@ def test_fixed_seed_regeneration_matches_committed_dataset_artifacts(tmp_path) -
         (tmp_path / "expected/reconciliation.json", "sample_data/expected/reconciliation.json"),
         (tmp_path / "source/aed_january_2026.csv", "sample_data/source/aed_january_2026.csv"),
         (tmp_path / "source/aed_statement_tabular.pdf", "sample_data/source/aed_statement_tabular.pdf"),
+        (
+            tmp_path / "source/aed_statement_image_only.pdf",
+            "sample_data/source/aed_statement_image_only.pdf",
+        ),
         (tmp_path / "source/pkr_statement_compact.pdf", "sample_data/source/pkr_statement_compact.pdf"),
     ):
         assert generated_path.read_bytes() == (REPOSITORY_ROOT / committed_path).read_bytes()
@@ -74,7 +78,11 @@ def test_fixed_seed_generates_the_same_canonical_ledger_and_sources(tmp_path) ->
     assert sha256(first.csv_path.read_bytes()).hexdigest() == sha256(
         second.csv_path.read_bytes()
     ).hexdigest()
-    for filename in ("aed_statement_tabular.pdf", "pkr_statement_compact.pdf"):
+    for filename in (
+        "aed_statement_image_only.pdf",
+        "aed_statement_tabular.pdf",
+        "pkr_statement_compact.pdf",
+    ):
         assert sha256((first.csv_path.parent / filename).read_bytes()).hexdigest() == sha256(
             (second.csv_path.parent / filename).read_bytes()
         ).hexdigest()
@@ -119,5 +127,5 @@ def test_reconciliation_matches_each_currency_account_and_exposes_required_edges
         "first_time_large_purchase",
     } <= edge_cases
 
-    assert len(list(tmp_path.glob("source/*.pdf"))) == 2
+    assert len(list(tmp_path.glob("source/*.pdf"))) == 3
     assert len(list(tmp_path.glob("source/*.csv"))) == 1

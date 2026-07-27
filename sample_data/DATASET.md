@@ -13,6 +13,7 @@ The fixed seed is `20260727`. The generated ledger covers 25 calendar months, fr
 ## Source documents
 
 - `source/aed_statement_tabular.pdf`: AED account `AED-SYNTH-001`, tabular A4 layout, January 2024 through December 2025.
+- `source/aed_statement_image_only.pdf`: one invented AED transaction rendered into an image and embedded in a PDF with no text layer, for local OCR fallback tests. It is not part of the canonical ledger partition.
 - `source/pkr_statement_compact.pdf`: PKR account `PKR-SYNTH-001`, compact letter layout with a blue header and two-line activity rows, January 2024 through January 2026.
 - `source/aed_january_2026.csv`: AED account `AED-SYNTH-001`, January 2026 only.
 
