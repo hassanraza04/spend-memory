@@ -182,7 +182,7 @@ def _write_pkr_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
         y -= 18
         if y < 36:
             canvas.showPage()
-            y = height - 42
+            y = height - 78
             canvas.setFillColorRGB(0, 0.18, 0.34)
             canvas.rect(0, height - 58, width, 58, fill=1, stroke=0)
             canvas.setFillColorRGB(1, 1, 1)

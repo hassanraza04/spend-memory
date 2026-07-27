@@ -73,11 +73,10 @@ class SyntheticPkrCompactPdfParser:
         amount_match = _AMOUNT.fullmatch(amount_line)
         if not description_text or amount_match is None or int(amount_match.group(1)) == 0:
             raise StatementParserError(ParserErrorCode.MALFORMED)
-        amount_text = amount_match.group(1)
         return ParsedRawTransaction(
             date_text=date_text,
             description_text=description_text,
-            amount_text=amount_text,
+            amount_text=amount_line,
             currency_text="PKR",
             source_page=page_number,
             source_row=source_row,

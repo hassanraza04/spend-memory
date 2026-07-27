@@ -40,10 +40,13 @@ def _parser_known_fields(parsed: object) -> tuple[str, str, str, str | None, str
 
 
 def _expected_known_fields(transaction: dict[str, object]) -> tuple[str, str, str, str, str]:
+    amount_text = str(transaction["amount_minor"])
+    if transaction["source_document"] == "source/pkr_statement_compact.pdf":
+        amount_text = f"PKR {amount_text}"
     return (
         str(transaction["posted_date"]),
         str(transaction["description"]),
-        str(transaction["amount_minor"]),
+        amount_text,
         str(transaction["currency"]),
         str(transaction["account_id"]),
     )
@@ -100,6 +103,9 @@ def test_each_parser_preserves_format_metadata_and_lineage() -> None:
         "SYN-00835,2026-01-01,AED-SYNTH-001,AED,-10847,BREW-LAB,debit"
     )
     assert csv_transaction.extraction_confidence == 1.0
+
+    assert pkr_transaction.amount_text == "PKR -182338"
+    assert pkr_transaction.currency_text == "PKR"
 
     for transaction, currency, account in (
         (aed_transaction, "AED", "AED-SYNTH-001"),
