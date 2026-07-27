@@ -8,9 +8,8 @@ test:
 	pnpm --dir apps/web test
 
 lint:
-	UV_CACHE_DIR=.uv-cache uv run ruff check apps/api
+	UV_CACHE_DIR=.uv-cache uv run ruff check apps/api sample_data
 	pnpm --dir apps/web lint
 
 clean-demo:
 	docker compose down --volumes --remove-orphans
-

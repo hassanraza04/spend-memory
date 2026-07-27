@@ -1,0 +1,36 @@
+# Secrets and source-control metadata
+.env
+.env.*
+!.env.example
+.git/
+
+# Local environments, dependencies, and build artifacts
+.venv/
+venv/
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+dist/
+coverage/
+htmlcov/
+.cache/
+.mypy_cache/
+.turbo/
+.pnpm-store/
+*.egg-info/
+*.py[cod]
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# Local application state and developer tooling
+apps/api/data/
+data/
+*.duckdb
+.superpowers/
+.agents/
+.codex/
+.DS_Store
