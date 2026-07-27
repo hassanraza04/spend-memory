@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
@@ -77,6 +78,73 @@ class ConcurrentParser(StubParser):
         else:
             self.second_parse_entered.set()
         return self._transactions
+
+
+class SignalingParser(StubParser):
+    def __init__(self, version: str) -> None:
+        super().__init__(version=version)
+        self.parse_entered = Event()
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        self.parse_entered.set()
+        return super().parse(document)
+
+
+class IndependentProcessParser(StubParser):
+    def __init__(self, parse_count, both_parsers_entered) -> None:
+        super().__init__()
+        self._shared_parse_count = parse_count
+        self._both_parsers_entered = both_parsers_entered
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        with self._shared_parse_count.get_lock():
+            self._shared_parse_count.value += 1
+            if self._shared_parse_count.value == 2:
+                self._both_parsers_entered.set()
+        self._both_parsers_entered.wait(timeout=1)
+        return self._transactions
+
+
+def _run_independent_process_import(
+    database_path: str,
+    data_directory: str,
+    ready_queue,
+    start_import,
+    parse_count,
+    both_parsers_entered,
+    result_queue,
+) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=Path(database_path),
+        data_directory=Path(data_directory),
+    )
+    ready_queue.put(True)
+    if not start_import.wait(timeout=10):
+        result_queue.put(("error", "start_timeout"))
+        return
+
+    try:
+        result = store.import_document(
+            document=CSV_DOCUMENT,
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+            parser=IndependentProcessParser(
+                parse_count,
+                both_parsers_entered,
+            ),
+        )
+    except BaseException as error:  # noqa: BLE001
+        result_queue.put(("error", type(error).__name__))
+    else:
+        result_queue.put(
+            (
+                "ok",
+                str(result.document_id),
+                str(result.run_id),
+                result.was_already_imported,
+            )
+        )
 
 
 def _repository_module():
@@ -278,6 +346,135 @@ def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
     assert results[0].run_id == results[1].run_id
     assert sorted(result.was_already_imported for result in results) == [False, True]
     assert counts == (1, 1, 1, 0)
+
+
+def test_independent_process_exact_retries_share_one_import_run(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    data_directory = tmp_path / "data"
+    repository.ImportRepository(
+        database_path=database_path,
+        data_directory=data_directory,
+    )
+    process_context = multiprocessing.get_context("spawn")
+    ready_queue = process_context.Queue()
+    result_queue = process_context.Queue()
+    start_import = process_context.Event()
+    both_parsers_entered = process_context.Event()
+    parse_count = process_context.Value("i", 0)
+    worker_arguments = (
+        str(database_path),
+        str(data_directory),
+        ready_queue,
+        start_import,
+        parse_count,
+        both_parsers_entered,
+        result_queue,
+    )
+    workers = [
+        process_context.Process(
+            target=_run_independent_process_import,
+            args=worker_arguments,
+        )
+        for _ in range(2)
+    ]
+
+    try:
+        workers[0].start()
+        assert ready_queue.get(timeout=10) is True
+        workers[1].start()
+        assert ready_queue.get(timeout=10) is True
+        start_import.set()
+        results = [result_queue.get(timeout=15) for _ in workers]
+        for worker in workers:
+            worker.join(timeout=10)
+    finally:
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+            worker.join(timeout=10)
+
+    assert parse_count.value == 1
+    assert [result[0] for result in results] == ["ok", "ok"]
+    assert results[0][1:3] == results[1][1:3]
+    assert sorted(result[3] for result in results) == [False, True]
+    assert not (data_directory / ".locks").exists()
+
+
+def test_concurrent_parser_versions_cannot_remove_a_successful_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    data_directory = tmp_path / "data"
+    failing_store = repository.ImportRepository(
+        database_path=database_path,
+        data_directory=data_directory,
+    )
+    successful_store = repository.ImportRepository(
+        database_path=database_path,
+        data_directory=data_directory,
+    )
+    failed_version = StubParser(version="1.0")
+    successful_version = SignalingParser(version="2.0")
+    first_final_file_moved = Event()
+    release_failed_move = Event()
+    real_replace = repository.os.replace
+    replace_calls = 0
+    replace_calls_lock = Lock()
+
+    def pause_first_move_then_fail(source: Path, destination: Path) -> None:
+        nonlocal replace_calls
+        with replace_calls_lock:
+            replace_calls += 1
+            call_number = replace_calls
+        real_replace(source, destination)
+        if call_number == 1:
+            first_final_file_moved.set()
+            if not release_failed_move.wait(timeout=10):
+                raise RuntimeError("concurrency test did not release file move")
+            raise OSError("SENSITIVE-AFTER-FINAL-MOVE")
+
+    monkeypatch.setattr(repository.os, "replace", pause_first_move_then_fail)
+
+    def import_failed_version():
+        with pytest.raises(repository.ImportRepositoryError) as caught:
+            failing_store.import_document(
+                document=CSV_DOCUMENT,
+                filename="statement.csv",
+                declared_mime_type="text/csv",
+                parser=failed_version,
+            )
+        return caught.value.code
+
+    def import_successful_version():
+        return successful_store.import_document(
+            document=CSV_DOCUMENT,
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+            parser=successful_version,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        failed_future = executor.submit(import_failed_version)
+        assert first_final_file_moved.wait(timeout=5)
+        successful_future = executor.submit(import_successful_version)
+        entered_while_failed_import_owned_file = (
+            successful_version.parse_entered.wait(timeout=1)
+        )
+        release_failed_move.set()
+        failed_code = failed_future.result(timeout=10)
+        successful_result = successful_future.result(timeout=10)
+
+    final_path = data_directory / f"{sha256(CSV_DOCUMENT).hexdigest()}.csv"
+    assert entered_while_failed_import_owned_file is False
+    assert failed_code == "storage_failed"
+    assert successful_result.was_already_imported is False
+    assert final_path.read_bytes() == CSV_DOCUMENT
+    assert not (data_directory / ".locks").exists()
 
 
 def test_new_parser_version_reprocesses_and_is_the_only_active_run(
@@ -482,7 +679,7 @@ def test_parser_failure_is_recorded_without_partial_import_data(
             "parser_failed",
         )
     ]
-    assert not store.data_directory.exists()
+    assert list(store.data_directory.iterdir()) == []
 
 
 def test_failed_reprocessing_does_not_replace_the_active_run(

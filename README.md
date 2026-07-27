@@ -21,6 +21,11 @@ make lint
 
 Use `make dev` to build and start the stack. The web app is bound to `127.0.0.1:3000` and the API health endpoint is at `http://127.0.0.1:8000/health`. DuckDB data is retained in the local `duckdb_data` Docker volume. Use `make clean-demo` to stop the stack and remove that demo volume.
 
+Import storage uses `fcntl` advisory file locks to coordinate local workers that
+share a configured data directory. This is supported on macOS, Linux, and the
+Linux Docker runtime used by this project. Windows is not a supported local
+runtime.
+
 ## Branch convention
 
 `main` remains stable. Normal work uses `feature/<short-name>`. Use isolated Git worktrees for parallel or high-risk changes. The tracked `.githooks/pre-push` hook rejects non-fast-forward pushes to `main`; enable it locally with:

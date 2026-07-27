@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fcntl
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -36,7 +38,7 @@ _IMPORT_GATES_LOCK = Lock()
 
 
 @contextmanager
-def _import_gate(key: tuple[str, str, str, str]) -> Iterator[None]:
+def _import_gate(key: tuple[str, str, str]) -> Iterator[None]:
     with _IMPORT_GATES_LOCK:
         gate = _IMPORT_GATES.get(key)
         if gate is None:
@@ -44,6 +46,75 @@ def _import_gate(key: tuple[str, str, str, str]) -> Iterator[None]:
             _IMPORT_GATES[key] = gate
     with gate:
         yield
+
+
+@contextmanager
+def _document_file_lock(
+    data_directory: Path,
+    document_sha256: str,
+) -> Iterator[None]:
+    data_directory.mkdir(parents=True, exist_ok=True)
+    locks_directory = data_directory / ".locks"
+    lock_path = locks_directory / f"{document_sha256}.lock"
+    directory_fd = os.open(data_directory, os.O_RDONLY)
+    document_lock_fd: int | None = None
+
+    try:
+        while document_lock_fd is None:
+            fcntl.flock(directory_fd, fcntl.LOCK_EX)
+            candidate_fd: int | None = None
+            try:
+                locks_directory.mkdir(mode=0o700, exist_ok=True)
+                candidate_fd = os.open(
+                    lock_path,
+                    os.O_RDWR | os.O_CREAT,
+                    0o600,
+                )
+                try:
+                    fcntl.flock(
+                        candidate_fd,
+                        fcntl.LOCK_EX | fcntl.LOCK_NB,
+                    )
+                except BlockingIOError:
+                    os.close(candidate_fd)
+                else:
+                    document_lock_fd = candidate_fd
+            finally:
+                fcntl.flock(directory_fd, fcntl.LOCK_UN)
+
+            if document_lock_fd is None:
+                time.sleep(0.01)
+
+        yield
+    finally:
+        if document_lock_fd is not None:
+            fcntl.flock(directory_fd, fcntl.LOCK_EX)
+            try:
+                try:
+                    artifact_stat = lock_path.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    lock_stat = os.fstat(document_lock_fd)
+                    if (
+                        artifact_stat.st_dev == lock_stat.st_dev
+                        and artifact_stat.st_ino == lock_stat.st_ino
+                    ):
+                        lock_path.unlink()
+
+                fcntl.flock(document_lock_fd, fcntl.LOCK_UN)
+                os.close(document_lock_fd)
+                document_lock_fd = None
+                try:
+                    locks_directory.rmdir()
+                except OSError:
+                    pass
+            finally:
+                if document_lock_fd is not None:
+                    fcntl.flock(document_lock_fd, fcntl.LOCK_UN)
+                    os.close(document_lock_fd)
+                fcntl.flock(directory_fd, fcntl.LOCK_UN)
+        os.close(directory_fd)
 
 
 class ImportRepositoryError(Exception):
@@ -136,12 +207,14 @@ class ImportRepository:
         final_path = self.data_directory / storage_filename
         import_key = (
             str(self.database_path.resolve()),
+            str(self.data_directory.resolve()),
             document_sha256,
-            parser.parser_id,
-            parser.version,
         )
 
-        with _import_gate(import_key):
+        with (
+            _import_gate(import_key),
+            _document_file_lock(self.data_directory, document_sha256),
+        ):
             return self._import_validated_document(
                 document=document,
                 filename=filename,
