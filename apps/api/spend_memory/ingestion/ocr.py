@@ -17,6 +17,7 @@ class OcrErrorCode(str, Enum):
     IMAGE_PIXELS = "ocr_image_pixels"
     TIMEOUT = "ocr_timeout"
     ENGINE = "ocr_engine"
+    ENCRYPTED_PDF = "ocr_encrypted_pdf"
     MALFORMED_PDF = "ocr_malformed_pdf"
 
 
@@ -89,7 +90,9 @@ def extract_pdf_page_text(
     try:
         with fitz.open(stream=document, filetype="pdf") as pdf:
             _remaining_seconds(deadline)
-            if pdf.needs_pass or not pdf.page_count:
+            if pdf.needs_pass:
+                raise OcrError(OcrErrorCode.ENCRYPTED_PDF)
+            if not pdf.page_count:
                 raise OcrError(OcrErrorCode.MALFORMED_PDF)
             if pdf.page_count > limits.max_pages:
                 raise OcrError(OcrErrorCode.PAGE_LIMIT)

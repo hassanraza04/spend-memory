@@ -281,6 +281,22 @@ def test_amount_normalization_only_returns_valid_unambiguous_integer_tokens(
     assert normalize_ocr_amount_token(source) == expected
 
 
+def test_ocr_amount_keeps_source_token_and_records_normalization_separately() -> None:
+    transaction = SyntheticAedTabularPdfParser._transaction(
+        date_text="2026-01-15",
+        description_text="OCR TEST MARKET",
+        amount_text="-I2O0",
+        page_number=1,
+        source_row=1,
+        used_ocr=True,
+        extraction_confidence=0.65,
+    )
+
+    assert transaction.amount_text == "-I2O0"
+    assert transaction.normalized_amount_text == "-1200"
+    assert transaction.source_text == "2026-01-15\nOCR TEST MARKET\n-I2O0"
+
+
 def test_image_only_fixture_has_no_text_layer_and_parses_through_real_local_ocr() -> None:
     original = IMAGE_ONLY_FIXTURE.read_bytes()
     original_hash = sha256(original).hexdigest()
@@ -294,6 +310,7 @@ def test_image_only_fixture_has_no_text_layer_and_parses_through_real_local_ocr(
     assert transaction.date_text == "2026-01-15"
     assert transaction.description_text == "OCR TEST MARKET"
     assert transaction.amount_text == "-1200"
+    assert transaction.normalized_amount_text is None
     assert transaction.currency_text == "AED"
     assert transaction.source_page == 1
     assert transaction.source_row == 1

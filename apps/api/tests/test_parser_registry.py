@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 
+import fitz
 import pytest
 from spend_memory.ingestion.base import ParsedRawTransaction
 from spend_memory.ingestion.registry import (
@@ -63,6 +64,22 @@ def test_registry_preserves_declared_encrypted_document_errors() -> None:
 
     with pytest.raises(StatementParserError) as caught:
         registry.parse(b"encrypted-pdf", "statement.pdf")
+
+    assert caught.value.code is ParserErrorCode.ENCRYPTED
+
+
+def test_registry_classifies_a_real_encrypted_pdf_as_encrypted() -> None:
+    with fitz.open() as pdf:
+        pdf.new_page().insert_text((50, 50), "encrypted statement")
+        encrypted = pdf.tobytes(
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-secret",
+            user_pw="user-secret",
+        )
+    registry = ParserRegistry([_Parser("pdf", 1.0)])
+
+    with pytest.raises(StatementParserError) as caught:
+        registry.select(encrypted, "statement.pdf")
 
     assert caught.value.code is ParserErrorCode.ENCRYPTED
 

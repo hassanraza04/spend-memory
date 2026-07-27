@@ -28,7 +28,9 @@ class SyntheticPkrCompactPdfParser:
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         try:
             with fitz.open(stream=document, filetype="pdf") as pdf:
-                if pdf.needs_pass or not pdf.page_count:
+                if pdf.needs_pass:
+                    raise StatementParserError(ParserErrorCode.ENCRYPTED)
+                if not pdf.page_count:
                     raise StatementParserError(ParserErrorCode.MALFORMED)
                 transactions = [
                     transaction

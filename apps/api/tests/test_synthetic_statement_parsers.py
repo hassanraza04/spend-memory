@@ -4,6 +4,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 
+import fitz
 import pytest
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
@@ -88,7 +89,7 @@ def test_collective_parser_output_matches_the_expected_ledger() -> None:
 
 def test_parser_versions_mark_the_explicit_provenance_contract() -> None:
     assert CanonicalCsvParser.version == "1.1"
-    assert SyntheticAedTabularPdfParser.version == "1.1"
+    assert SyntheticAedTabularPdfParser.version == "1.2"
     assert SyntheticPkrCompactPdfParser.version == "1.1"
 
 
@@ -178,3 +179,22 @@ def test_aed_pdf_rejects_ambiguous_dates_and_amounts(posted_date: str, amount: s
         )
 
     assert caught.value.code is ParserErrorCode.MALFORMED
+
+
+@pytest.mark.parametrize(
+    "parser",
+    (SyntheticAedTabularPdfParser(), SyntheticPkrCompactPdfParser()),
+)
+def test_pdf_parsers_classify_real_encrypted_documents_as_encrypted(parser) -> None:
+    with fitz.open() as pdf:
+        pdf.new_page().insert_text((50, 50), "encrypted statement")
+        encrypted = pdf.tobytes(
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-secret",
+            user_pw="user-secret",
+        )
+
+    with pytest.raises(StatementParserError) as caught:
+        parser.parse(encrypted)
+
+    assert caught.value.code is ParserErrorCode.ENCRYPTED

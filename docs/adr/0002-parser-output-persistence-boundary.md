@@ -10,7 +10,7 @@ A statement parser works only with document bytes and source details. It cannot 
 
 ## Decision
 
-`StatementParser` returns immutable `ParsedRawTransaction` values. They retain the raw source fields, page, row, text lineage, optional raw account identity, reference and balance, and extraction confidence. In particular, `amount_text` remains unchanged from the statement.
+`StatementParser` returns immutable `ParsedRawTransaction` values. They retain the raw source fields, page, row, text lineage, optional raw account identity, reference and balance, and extraction confidence. In particular, `amount_text` remains unchanged from the statement. When OCR safely corrects an unambiguous amount token, the parser stores that correction separately as `normalized_amount_text`.
 
 The ingestion storage stage later creates persisted `RawTransaction` records and assigns source-document and raw-transaction IDs.
 

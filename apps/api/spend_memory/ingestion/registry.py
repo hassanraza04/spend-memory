@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from enum import Enum
 
+import fitz
+
 from spend_memory.ingestion.base import ParsedRawTransaction, StatementParser
 
 
@@ -27,6 +29,7 @@ class ParserRegistry:
         self._parsers.append(parser)
 
     def select(self, document: bytes, filename: str) -> StatementParser:
+        _raise_if_encrypted_pdf(document, filename)
         try:
             candidates = [
                 (parser.can_parse(document, filename), parser) for parser in self._parsers
@@ -35,7 +38,9 @@ class ParserRegistry:
             raise
         except Exception:  # noqa: BLE001
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
-        compatible = [(confidence, parser) for confidence, parser in candidates if confidence > 0]
+        compatible = [
+            (confidence, parser) for confidence, parser in candidates if confidence > 0
+        ]
         if not compatible:
             raise StatementParserError(ParserErrorCode.UNSUPPORTED)
         highest_confidence = max(confidence for confidence, _ in compatible)
@@ -53,3 +58,16 @@ class ParserRegistry:
             raise
         except Exception:  # noqa: BLE001
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
+
+
+def _raise_if_encrypted_pdf(document: bytes, filename: str) -> None:
+    if not filename.lower().endswith(".pdf") or not document.startswith(b"%PDF-"):
+        return
+    try:
+        with fitz.open(stream=document, filetype="pdf") as pdf:
+            if pdf.needs_pass:
+                raise StatementParserError(ParserErrorCode.ENCRYPTED)
+    except StatementParserError:
+        raise
+    except (fitz.FileDataError, RuntimeError, ValueError):
+        return

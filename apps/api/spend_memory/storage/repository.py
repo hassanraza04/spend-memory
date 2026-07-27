@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import fcntl
+import multiprocessing
 import os
+import stat
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,11 +32,17 @@ class ImportResult:
 class ImportLimits:
     max_document_bytes: int = 20 * 1024 * 1024
     max_pdf_pages: int = 20
+    max_pdf_objects: int = 50_000
+    max_pdf_page_width_points: float = 14_400
+    max_pdf_page_height_points: float = 14_400
+    pdf_preflight_timeout_seconds: float = 2.0
 
 
 DEFAULT_IMPORT_LIMITS = ImportLimits()
 _IMPORT_GATES = WeakValueDictionary()
 _IMPORT_GATES_LOCK = Lock()
+_DATABASE_GATES = WeakValueDictionary()
+_DATABASE_GATES_LOCK = Lock()
 
 
 @contextmanager
@@ -46,6 +54,31 @@ def _import_gate(key: tuple[str, str, str]) -> Iterator[None]:
             _IMPORT_GATES[key] = gate
     with gate:
         yield
+
+
+@contextmanager
+def _database_write_lock(database_path: Path) -> Iterator[None]:
+    """Serialize every DuckDB writer in this process and across local workers."""
+    resolved_database_path = database_path.resolve()
+    gate_key = str(resolved_database_path)
+    with _DATABASE_GATES_LOCK:
+        gate = _DATABASE_GATES.get(gate_key)
+        if gate is None:
+            gate = Lock()
+            _DATABASE_GATES[gate_key] = gate
+
+    resolved_database_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = resolved_database_path.with_name(
+        f".{resolved_database_path.name}.write.lock"
+    )
+    with gate:
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
 
 @contextmanager
@@ -133,7 +166,10 @@ def apply_migrations(
     storage_directory = Path(__file__).parent
     migration_directory = migration_directory or storage_directory / "migrations"
 
-    with duckdb.connect(str(database_path)) as connection:
+    with (
+        _database_write_lock(database_path),
+        duckdb.connect(str(database_path)) as connection,
+    ):
         connection.execute("BEGIN TRANSACTION")
         try:
             connection.execute(
@@ -180,6 +216,57 @@ class ImportRepository:
         declared_mime_type: str,
         parser: StatementParser,
     ) -> ImportResult:
+        self.validate_document(
+            document=document,
+            filename=filename,
+            declared_mime_type=declared_mime_type,
+        )
+        return self._import_prevalidated_document(
+            document=document,
+            filename=filename,
+            declared_mime_type=declared_mime_type,
+            parser=parser,
+        )
+
+    def _import_prevalidated_document(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser: StatementParser,
+    ) -> ImportResult:
+        document_sha256 = sha256(document).hexdigest()
+        storage_filename = f"{document_sha256}{_extension_for(declared_mime_type)}"
+        final_path = self.data_directory / storage_filename
+        import_key = (
+            str(self.database_path.resolve()),
+            str(self.data_directory.resolve()),
+            document_sha256,
+        )
+
+        with (
+            _import_gate(import_key),
+            _document_file_lock(self.data_directory.resolve(), document_sha256),
+        ):
+            return self._import_validated_document(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser=parser,
+                document_sha256=document_sha256,
+                storage_filename=storage_filename,
+                final_path=final_path,
+            )
+
+    def validate_document(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+    ) -> None:
+        """Reject unsafe input before any parser detection or parsing work."""
         if (
             not filename
             or filename in {".", ".."}
@@ -202,28 +289,6 @@ class ImportRepository:
             raise ImportRepositoryError("mime_type_mismatch")
         if declared_mime_type == "application/pdf":
             self._validate_pdf(document)
-        document_sha256 = sha256(document).hexdigest()
-        storage_filename = f"{document_sha256}{_extension_for(declared_mime_type)}"
-        final_path = self.data_directory / storage_filename
-        import_key = (
-            str(self.database_path.resolve()),
-            str(self.data_directory.resolve()),
-            document_sha256,
-        )
-
-        with (
-            _import_gate(import_key),
-            _document_file_lock(self.data_directory, document_sha256),
-        ):
-            return self._import_validated_document(
-                document=document,
-                filename=filename,
-                declared_mime_type=declared_mime_type,
-                parser=parser,
-                document_sha256=document_sha256,
-                storage_filename=storage_filename,
-                final_path=final_path,
-            )
 
     def _import_validated_document(
         self,
@@ -236,7 +301,10 @@ class ImportRepository:
         storage_filename: str,
         final_path: Path,
     ) -> ImportResult:
-        with duckdb.connect(str(self.database_path)) as connection:
+        with (
+            _database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
             existing = connection.execute(
                 """
                 SELECT d.document_id, r.run_id,
@@ -251,13 +319,28 @@ class ImportRepository:
                 """,
                 [document_sha256, parser.parser_id, parser.version],
             ).fetchone()
-            if existing is not None:
-                return ImportResult(
-                    document_id=existing[0],
-                    run_id=existing[1],
-                    transaction_count=existing[2],
-                    was_already_imported=True,
+        if existing is not None:
+            try:
+                self._ensure_document_file(
+                    document=document,
+                    document_sha256=document_sha256,
+                    final_path=final_path,
                 )
+            except Exception:  # noqa: BLE001
+                self._record_error(
+                    document_sha256=document_sha256,
+                    filename=filename,
+                    declared_mime_type=declared_mime_type,
+                    parser=parser,
+                    code="storage_failed",
+                )
+                raise ImportRepositoryError("storage_failed") from None
+            return ImportResult(
+                document_id=existing[0],
+                run_id=existing[1],
+                transaction_count=existing[2],
+                was_already_imported=True,
+            )
 
         try:
             transactions = parser.parse(document)
@@ -286,7 +369,10 @@ class ImportRepository:
         remove_final_file_on_failure = False
 
         try:
-            with duckdb.connect(str(self.database_path)) as connection:
+            with (
+                _database_write_lock(self.database_path),
+                duckdb.connect(str(self.database_path)) as connection,
+            ):
                 connection.execute("BEGIN TRANSACTION")
                 try:
                     existing_document = connection.execute(
@@ -348,9 +434,7 @@ class ImportRepository:
                         """,
                         [document_id, run_id],
                     )
-                    for source_ordinal, transaction in enumerate(
-                        transactions, start=1
-                    ):
+                    for source_ordinal, transaction in enumerate(transactions, start=1):
                         connection.execute(
                             """
                             INSERT INTO raw_transactions (
@@ -360,6 +444,7 @@ class ImportRepository:
                                 date_text,
                                 description_text,
                                 amount_text,
+                                normalized_amount_text,
                                 currency_text,
                                 source_page,
                                 source_row,
@@ -370,7 +455,7 @@ class ImportRepository:
                                 raw_balance_text,
                                 extraction_confidence
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             [
                                 uuid4(),
@@ -379,6 +464,7 @@ class ImportRepository:
                                 transaction.date_text,
                                 transaction.description_text,
                                 transaction.amount_text,
+                                transaction.normalized_amount_text,
                                 transaction.currency_text,
                                 transaction.source_page,
                                 transaction.source_row,
@@ -391,9 +477,10 @@ class ImportRepository:
                             ],
                         )
 
-                    if not final_path.exists():
-                        remove_final_file_on_failure = True
+                    if not _file_has_sha256(final_path, document_sha256):
+                        remove_final_file_on_failure = existing_document is None
                         os.replace(staged_path, final_path)
+                        _fsync_directory(self.data_directory)
                     connection.execute("COMMIT")
                 except BaseException:
                     connection.execute("ROLLBACK")
@@ -401,6 +488,7 @@ class ImportRepository:
         except BaseException as error:
             if remove_final_file_on_failure:
                 final_path.unlink(missing_ok=True)
+                _fsync_directory(self.data_directory)
             if not isinstance(error, Exception):
                 raise
             self._record_error(
@@ -435,6 +523,22 @@ class ImportRepository:
             raise
         return staged_path
 
+    def _ensure_document_file(
+        self,
+        *,
+        document: bytes,
+        document_sha256: str,
+        final_path: Path,
+    ) -> None:
+        if _file_has_sha256(final_path, document_sha256):
+            return
+        staged_path = self._stage_document(document, document_sha256)
+        try:
+            os.replace(staged_path, final_path)
+            _fsync_directory(self.data_directory)
+        finally:
+            staged_path.unlink(missing_ok=True)
+
     def _record_error(
         self,
         *,
@@ -444,7 +548,10 @@ class ImportRepository:
         parser: StatementParser,
         code: str,
     ) -> None:
-        with duckdb.connect(str(self.database_path)) as connection:
+        with (
+            _database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
             connection.execute(
                 """
                 INSERT INTO import_errors (
@@ -472,16 +579,40 @@ class ImportRepository:
             )
 
     def _validate_pdf(self, document: bytes) -> None:
+        timeout_seconds = self.limits.pdf_preflight_timeout_seconds
+        if timeout_seconds <= 0:
+            raise ImportRepositoryError("pdf_preflight_timeout")
+
+        process_context = multiprocessing.get_context("spawn")
+        receive_result, send_result = process_context.Pipe(duplex=False)
+        worker = process_context.Process(
+            target=_pdf_preflight_worker,
+            args=(document, self.limits, send_result),
+        )
         try:
-            with fitz.open(stream=document, filetype="pdf") as pdf:
-                if pdf.needs_pass or not pdf.page_count:
-                    raise ImportRepositoryError("invalid_pdf")
-                if pdf.page_count > self.limits.max_pdf_pages:
-                    raise ImportRepositoryError("pdf_page_limit")
-        except ImportRepositoryError:
-            raise
-        except (fitz.FileDataError, RuntimeError, ValueError):
-            raise ImportRepositoryError("invalid_pdf") from None
+            worker.start()
+            send_result.close()
+            worker.join(timeout=timeout_seconds)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=1)
+                if worker.is_alive():
+                    worker.kill()
+                    worker.join()
+                raise ImportRepositoryError("pdf_preflight_timeout")
+            if worker.exitcode != 0 or not receive_result.poll():
+                raise ImportRepositoryError("invalid_pdf")
+            error_code = receive_result.recv()
+        finally:
+            send_result.close()
+            receive_result.close()
+            if worker.is_alive():
+                worker.terminate()
+                worker.join()
+            worker.close()
+
+        if error_code is not None:
+            raise ImportRepositoryError(error_code)
 
 
 def _extension_for(mime_type: str) -> str:
@@ -499,3 +630,62 @@ def _is_text_document(document: bytes) -> bool:
     return not any(
         ord(character) < 32 and character not in "\t\r\n" for character in text
     )
+
+
+def _file_has_sha256(path: Path, expected_sha256: str) -> bool:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_fd = os.open(path, flags)
+    except OSError:
+        return False
+    try:
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            return False
+        digest = sha256()
+        while chunk := os.read(file_fd, 1024 * 1024):
+            digest.update(chunk)
+        return digest.hexdigest() == expected_sha256
+    except OSError:
+        return False
+    finally:
+        os.close(file_fd)
+
+
+def _fsync_directory(directory: Path) -> None:
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _pdf_preflight_worker(
+    document: bytes,
+    limits: ImportLimits,
+    result_connection,
+) -> None:
+    error_code: str | None = None
+    try:
+        with fitz.open(stream=document, filetype="pdf") as pdf:
+            if pdf.needs_pass:
+                error_code = "encrypted"
+            elif not pdf.page_count:
+                error_code = "invalid_pdf"
+            elif pdf.page_count > limits.max_pdf_pages:
+                error_code = "pdf_page_limit"
+            elif pdf.xref_length() > limits.max_pdf_objects:
+                error_code = "pdf_object_limit"
+            else:
+                for page in pdf:
+                    if (
+                        page.rect.width > limits.max_pdf_page_width_points
+                        or page.rect.height > limits.max_pdf_page_height_points
+                    ):
+                        error_code = "pdf_page_dimensions"
+                        break
+    except (fitz.FileDataError, RuntimeError, ValueError):
+        error_code = "invalid_pdf"
+    try:
+        result_connection.send(error_code)
+    finally:
+        result_connection.close()

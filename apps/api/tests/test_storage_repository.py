@@ -147,6 +147,39 @@ def _run_independent_process_import(
         )
 
 
+def _run_distinct_document_process_import(
+    database_path: str,
+    data_directory: str,
+    document: bytes,
+    ready_queue,
+    start_import,
+    parse_count,
+    both_parsers_entered,
+    result_queue,
+) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=Path(database_path),
+        data_directory=Path(data_directory),
+    )
+    ready_queue.put(True)
+    if not start_import.wait(timeout=10):
+        result_queue.put(("error", "start_timeout"))
+        return
+
+    try:
+        result = store.import_document(
+            document=document,
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+            parser=IndependentProcessParser(parse_count, both_parsers_entered),
+        )
+    except BaseException as error:  # noqa: BLE001
+        result_queue.put(("error", type(error).__name__))
+    else:
+        result_queue.put(("ok", str(result.document_id), str(result.run_id)))
+
+
 def _repository_module():
     try:
         return importlib.import_module("spend_memory.storage.repository")
@@ -183,7 +216,10 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ).fetchall()
         }
 
-    assert versions == [("0001_import_storage",)]
+    assert versions == [
+        ("0001_import_storage",),
+        ("0002_raw_amount_normalization",),
+    ]
     assert {
         "source_documents",
         "import_runs",
@@ -306,6 +342,71 @@ def test_same_document_and_parser_version_is_idempotent(tmp_path: Path) -> None:
     assert active_runs == [(first.run_id,)]
 
 
+@pytest.mark.parametrize("damage", ["missing", "corrupt"])
+def test_idempotent_retry_repairs_missing_or_corrupt_original_file(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+    parser = StubParser()
+    first = store.import_document(
+        document=CSV_DOCUMENT,
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+        parser=parser,
+    )
+    final_path = store.data_directory / f"{sha256(CSV_DOCUMENT).hexdigest()}.csv"
+    if damage == "missing":
+        final_path.unlink()
+    else:
+        final_path.write_bytes(b"corrupt original")
+
+    repeated = store.import_document(
+        document=CSV_DOCUMENT,
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+        parser=parser,
+    )
+
+    assert repeated.document_id == first.document_id
+    assert repeated.run_id == first.run_id
+    assert repeated.was_already_imported is True
+    assert parser.parse_calls == 1
+    assert final_path.read_bytes() == CSV_DOCUMENT
+
+
+def test_new_parser_version_repairs_corrupt_original_file(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+    store.import_document(
+        document=CSV_DOCUMENT,
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+        parser=StubParser(version="1.0"),
+    )
+    final_path = store.data_directory / f"{sha256(CSV_DOCUMENT).hexdigest()}.csv"
+    final_path.write_bytes(b"corrupt original")
+
+    result = store.import_document(
+        document=CSV_DOCUMENT,
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+        parser=StubParser(version="2.0"),
+    )
+
+    assert result.was_already_imported is False
+    assert final_path.read_bytes() == CSV_DOCUMENT
+
+
 def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
     repository = _repository_module()
     store = repository.ImportRepository(
@@ -401,6 +502,133 @@ def test_independent_process_exact_retries_share_one_import_run(
     assert results[0][1:3] == results[1][1:3]
     assert sorted(result[3] for result in results) == [False, True]
     assert not (data_directory / ".locks").exists()
+
+
+def test_independent_processes_coordinate_duckdb_writes_for_distinct_documents(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    data_directory = tmp_path / "data"
+    repository.ImportRepository(
+        database_path=database_path,
+        data_directory=data_directory,
+    )
+    process_context = multiprocessing.get_context("spawn")
+    ready_queue = process_context.Queue()
+    result_queue = process_context.Queue()
+    start_import = process_context.Event()
+    both_parsers_entered = process_context.Event()
+    parse_count = process_context.Value("i", 0)
+    documents = (
+        CSV_DOCUMENT,
+        CSV_DOCUMENT.replace(b"-1200", b"-1300"),
+    )
+    workers = [
+        process_context.Process(
+            target=_run_distinct_document_process_import,
+            args=(
+                str(database_path),
+                str(data_directory),
+                document,
+                ready_queue,
+                start_import,
+                parse_count,
+                both_parsers_entered,
+                result_queue,
+            ),
+        )
+        for document in documents
+    ]
+
+    try:
+        for worker in workers:
+            worker.start()
+            assert ready_queue.get(timeout=10) is True
+        start_import.set()
+        results = [result_queue.get(timeout=15) for _ in workers]
+        for worker in workers:
+            worker.join(timeout=10)
+    finally:
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+            worker.join(timeout=10)
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        counts = connection.execute(
+            """
+            SELECT
+                (SELECT count(*) FROM source_documents),
+                (SELECT count(*) FROM import_runs),
+                (SELECT count(*) FROM raw_transactions),
+                (SELECT count(*) FROM import_errors)
+            """
+        ).fetchone()
+
+    assert [result[0] for result in results] == ["ok", "ok"]
+    assert counts == (2, 2, 2, 0)
+
+
+def test_database_lock_uses_canonical_path_across_symlink_aliases(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    database_alias = tmp_path / "database-alias.duckdb"
+    data_directory = tmp_path / "data"
+    repository.ImportRepository(
+        database_path=database_path,
+        data_directory=data_directory,
+    )
+    database_alias.symlink_to(database_path)
+    process_context = multiprocessing.get_context("spawn")
+    ready_queue = process_context.Queue()
+    result_queue = process_context.Queue()
+    start_import = process_context.Event()
+    both_parsers_entered = process_context.Event()
+    parse_count = process_context.Value("i", 0)
+    workers = [
+        process_context.Process(
+            target=_run_distinct_document_process_import,
+            args=(
+                str(worker_database_path),
+                str(data_directory),
+                document,
+                ready_queue,
+                start_import,
+                parse_count,
+                both_parsers_entered,
+                result_queue,
+            ),
+        )
+        for worker_database_path, document in (
+            (database_path, CSV_DOCUMENT),
+            (database_alias, CSV_DOCUMENT.replace(b"-1200", b"-1300")),
+        )
+    ]
+
+    try:
+        for worker in workers:
+            worker.start()
+            assert ready_queue.get(timeout=10) is True
+        start_import.set()
+        results = [result_queue.get(timeout=15) for _ in workers]
+        for worker in workers:
+            worker.join(timeout=10)
+    finally:
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+            worker.join(timeout=10)
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        document_count = connection.execute(
+            "SELECT count(*) FROM source_documents"
+        ).fetchone()
+
+    assert [result[0] for result in results] == ["ok", "ok"]
+    assert document_count == (2,)
 
 
 def test_concurrent_parser_versions_cannot_remove_a_successful_source_file(
@@ -621,6 +849,47 @@ def test_original_document_bytes_are_stored_under_a_sha_derived_filename(
         expected_filename
     ]
     assert (store.data_directory / expected_filename).read_bytes() == CSV_DOCUMENT
+
+
+def test_raw_amount_and_ocr_normalization_are_stored_separately(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    transaction = StubParser()._transactions[0]
+    ocr_transaction = ParsedRawTransaction(
+        date_text=transaction.date_text,
+        description_text=transaction.description_text,
+        amount_text="-I2O0",
+        currency_text=transaction.currency_text,
+        source_page=1,
+        source_row=1,
+        source_text="2026-01-01\nSynthetic test purchase\n-I2O0",
+        extraction_method="ocr:tesseract",
+        normalized_amount_text="-1200",
+    )
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+
+    result = store.import_document(
+        document=CSV_DOCUMENT,
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+        parser=StubParser(transactions=[ocr_transaction]),
+    )
+
+    with duckdb.connect(str(store.database_path), read_only=True) as connection:
+        stored = connection.execute(
+            """
+            SELECT amount_text, normalized_amount_text
+            FROM raw_transactions
+            WHERE import_run_id = ?
+            """,
+            [result.run_id],
+        ).fetchone()
+
+    assert stored == ("-I2O0", "-1200")
 
 
 def test_parser_failure_is_recorded_without_partial_import_data(

@@ -8,6 +8,7 @@ import fitz
 from spend_memory.ingestion.base import ParsedRawTransaction
 from spend_memory.ingestion.ocr import (
     OcrError,
+    OcrErrorCode,
     extract_pdf_page_text,
     normalize_ocr_amount_token,
 )
@@ -21,7 +22,7 @@ _IMAGE_ONLY_FIXTURE_NAME = "aed_statement_image_only.pdf"
 
 class SyntheticAedTabularPdfParser:
     parser_id = "synthetic-aed-tabular-pdf"
-    version = "1.1"
+    version = "1.2"
 
     def can_parse(self, document: bytes, filename: str) -> float:
         if not filename.lower().endswith(".pdf"):
@@ -59,7 +60,11 @@ class SyntheticAedTabularPdfParser:
             ]
         except StatementParserError:
             raise
-        except (OcrError, fitz.FileDataError, RuntimeError, ValueError):
+        except OcrError as error:
+            if error.code is OcrErrorCode.ENCRYPTED_PDF:
+                raise StatementParserError(ParserErrorCode.ENCRYPTED) from None
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None
+        except (fitz.FileDataError, RuntimeError, ValueError):
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
         if not transactions:
             raise StatementParserError(ParserErrorCode.MALFORMED)
@@ -119,7 +124,7 @@ class SyntheticAedTabularPdfParser:
         return ParsedRawTransaction(
             date_text=date_text,
             description_text=description_text,
-            amount_text=parsed_amount_text,
+            amount_text=amount_text,
             currency_text="AED",
             source_page=page_number,
             source_row=source_row,
@@ -127,6 +132,11 @@ class SyntheticAedTabularPdfParser:
             raw_account_identity="AED-SYNTH-001",
             extraction_confidence=extraction_confidence,
             extraction_method="ocr:tesseract" if used_ocr else "embedded_text",
+            normalized_amount_text=(
+                parsed_amount_text
+                if used_ocr and parsed_amount_text != amount_text
+                else None
+            ),
         )
 
 

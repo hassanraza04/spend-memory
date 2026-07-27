@@ -20,6 +20,7 @@ class ParsedRawTransaction:
     raw_account_reference: str | None = None
     raw_balance_text: str | None = None
     extraction_confidence: float = 1.0
+    normalized_amount_text: str | None = None
 
 
 class StatementParser(Protocol):
