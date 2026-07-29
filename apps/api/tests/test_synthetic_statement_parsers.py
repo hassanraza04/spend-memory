@@ -145,7 +145,10 @@ def test_registry_selects_the_matching_synthetic_parser(filename: str, parser_id
         [CanonicalCsvParser(), SyntheticAedTabularPdfParser(), SyntheticPkrCompactPdfParser()]
     )
 
-    selected = registry.select((SOURCE_DIRECTORY / filename).read_bytes(), filename)
+    selected = registry._select_for_isolated_worker(
+        (SOURCE_DIRECTORY / filename).read_bytes(),
+        filename,
+    )
 
     assert selected.parser_id == parser_id
 

@@ -346,7 +346,7 @@ def test_image_only_fixture_has_no_text_layer_and_parses_through_real_local_ocr(
 def test_registry_selects_the_synthetic_parser_for_its_image_only_fixture() -> None:
     registry = ParserRegistry([SyntheticAedTabularPdfParser()])
 
-    selected = registry.select(
+    selected = registry._select_for_isolated_worker(
         IMAGE_ONLY_FIXTURE.read_bytes(),
         IMAGE_ONLY_FIXTURE.name,
     )
@@ -371,7 +371,7 @@ def test_registry_selection_then_parse_invokes_tesseract_once(monkeypatch) -> No
     monkeypatch.setattr(ocr, "run_tesseract", counting_run_tesseract)
     registry = ParserRegistry([SyntheticAedTabularPdfParser()])
 
-    transactions = registry.parse(
+    transactions = registry._parse_for_tests(
         IMAGE_ONLY_FIXTURE.read_bytes(),
         IMAGE_ONLY_FIXTURE.name,
     )

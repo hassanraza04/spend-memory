@@ -43,6 +43,12 @@ starts, so the kernel rejects a lower address-space limit. Parser extraction
 results are capped at 10,000 transactions before the API reads them. Limit
 breaches return safe import errors and never expose parser details.
 
+`IngestionService.import_document` is the only supported production entry point
+for statement bytes. It validates each document before using the registry's
+isolated parser worker. Direct parser calls are limited to trusted parser unit
+tests outside that worker; the registry does not expose public direct selection
+or parsing methods.
+
 ## Branch convention
 
 `main` remains stable. Normal work uses `feature/<short-name>`. Use isolated Git worktrees for parallel or high-risk changes. The tracked `.githooks/pre-push` hook rejects non-fast-forward pushes to `main`; enable it locally with:

@@ -37,13 +37,27 @@ class StatementParserError(Exception):
 
 
 class ParserRegistry:
+    """Registered statement parsers with an isolated public ingress path.
+
+    Production code must pass untrusted statement bytes through
+    :meth:`select_isolated`, normally via ``IngestionService.import_document``.
+    The underscore-prefixed helpers exist only for the isolated worker and
+    trusted parser unit tests. They intentionally do not form part of this
+    registry's public API.
+    """
+
     def __init__(self, parsers: Iterable[StatementParser] = ()) -> None:
         self._parsers = list(parsers)
 
     def register(self, parser: StatementParser) -> None:
         self._parsers.append(parser)
 
-    def select(self, document: bytes, filename: str) -> StatementParser:
+    def _select_for_isolated_worker(
+        self,
+        document: bytes,
+        filename: str,
+    ) -> StatementParser:
+        """Select a parser inside the spawned worker or a trusted unit test."""
         _raise_if_encrypted_pdf(document, filename)
         try:
             candidates = [
@@ -68,9 +82,14 @@ class ParserRegistry:
             raise StatementParserError(ParserErrorCode.AMBIGUOUS)
         return selected[0]
 
-    def parse(self, document: bytes, filename: str) -> list[ParsedRawTransaction]:
+    def _parse_for_tests(
+        self,
+        document: bytes,
+        filename: str,
+    ) -> list[ParsedRawTransaction]:
+        """Run a parser directly for trusted registry unit tests only."""
         try:
-            return self.select(document, filename).parse(document)
+            return self._select_for_isolated_worker(document, filename).parse(document)
         except StatementParserError:
             raise
         except MemoryError:
@@ -269,7 +288,10 @@ def _parser_worker(
         session_ready.set()
         try:
             resource_limits.apply_resource_limits(worker_resource_limits)
-            selected = ParserRegistry(parsers).select(document, filename)
+            selected = ParserRegistry(parsers)._select_for_isolated_worker(
+                document,
+                filename,
+            )
             selection_payload = {
                 "status": "selected",
                 "parser_id": selected.parser_id,
