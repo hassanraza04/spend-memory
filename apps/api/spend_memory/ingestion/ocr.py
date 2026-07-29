@@ -80,12 +80,18 @@ def _enforce_image_limits(width: int, height: int, limits: OcrLimits) -> None:
         raise OcrError(OcrErrorCode.IMAGE_PIXELS)
 
 
-def extract_pdf_page_text(
+def _extract_pdf_page_text_in_worker(
     document: bytes,
     *,
     limits: OcrLimits = DEFAULT_OCR_LIMITS,
     runner: OcrRunner | None = None,
 ) -> PdfPageTextResult:
+    """Read PDF text and OCR only within the isolated parser worker.
+
+    This helper performs native PyMuPDF work on untrusted PDF bytes. It is
+    intentionally private because callers outside the worker do not have the
+    process deadline and resource limits enforced by ``ParserRegistry``.
+    """
     deadline = monotonic() + limits.timeout_seconds
     try:
         with fitz.open(stream=document, filetype="pdf") as pdf:
@@ -117,7 +123,7 @@ def extract_pdf_page_text(
                 return PdfPageTextResult(tuple(page_text), ())
 
             ocr_pages: list[OcrPageText] = []
-            ocr_runner = runner or run_tesseract
+            ocr_runner = runner or _run_tesseract
             for page_index in textless_pages:
                 _remaining_seconds(deadline)
                 pixmap = pdf[page_index].get_pixmap(
@@ -148,13 +154,14 @@ def extract_pdf_page_text(
     return PdfPageTextResult(tuple(page_text), tuple(ocr_pages))
 
 
-def run_tesseract(
+def _run_tesseract(
     image: bytes,
     timeout_seconds: float,
     *,
     executable: str = "tesseract",
     dpi: int = 200,
 ) -> str:
+    """Run Tesseract for the private parser-worker OCR helper."""
     command = [
         executable,
         "stdin",

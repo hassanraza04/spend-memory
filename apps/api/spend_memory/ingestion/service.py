@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from spend_memory.ingestion.registry import ParserRegistry
-from spend_memory.storage.repository import ImportRepository, ImportResult
+from spend_memory.ingestion.registry import ParserRegistry, StatementParserError
+from spend_memory.storage.repository import (
+    ImportRepository,
+    ImportRepositoryError,
+    ImportResult,
+)
 
 
 @dataclass(frozen=True)
@@ -35,11 +39,24 @@ class IngestionService:
             worker_max_open_files=self.repository.limits.parser_max_open_files,
         )
         try:
-            return self.repository._import_prevalidated_document(
+            transactions = parser.parse(document)
+            return self.repository.store_preparsed_document(
                 document=document,
                 filename=filename,
                 declared_mime_type=declared_mime_type,
-                parser=parser,
+                parser_id=parser.parser_id,
+                parser_version=parser.version,
+                transactions=transactions,
             )
+        except StatementParserError as error:
+            self.repository.record_isolated_parse_error(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser_id=parser.parser_id,
+                parser_version=parser.version,
+                code=error.code.value,
+            )
+            raise ImportRepositoryError(error.code.value) from None
         finally:
             parser.close()

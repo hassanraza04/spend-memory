@@ -47,7 +47,10 @@ breaches return safe import errors and never expose parser details.
 for statement bytes. It validates each document before using the registry's
 isolated parser worker. Direct parser calls are limited to trusted parser unit
 tests outside that worker; the registry does not expose public direct selection
-or parsing methods.
+or parsing methods. `ImportRepository.store_preparsed_document` is a lower-level
+persistence boundary for already isolated `ParsedRawTransaction` output. It
+never selects or runs a parser. Native PDF text extraction and Tesseract OCR
+helpers are private parser-worker helpers, not production entry points.
 
 ## Branch convention
 

@@ -18,7 +18,7 @@ from weakref import WeakValueDictionary
 import duckdb
 import fitz
 
-from spend_memory.ingestion.base import StatementParser
+from spend_memory.ingestion.base import ParsedRawTransaction, StatementParser
 from spend_memory.ingestion.registry import StatementParserError
 from spend_memory.ingestion.resource_limits import (
     ResourceLimits,
@@ -252,6 +252,57 @@ class ImportRepository:
             parser=parser,
         )
 
+    def store_preparsed_document(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser_id: str,
+        parser_version: str,
+        transactions: list[ParsedRawTransaction],
+    ) -> ImportResult:
+        """Persist typed output that a safe ingress worker has already parsed.
+
+        This method never selects or invokes a statement parser. Production
+        callers must validate statement bytes and create ``transactions`` via
+        ``IngestionService.import_document``'s isolated parser worker first.
+        """
+        if (
+            not parser_id
+            or not parser_version
+            or not all(isinstance(transaction, ParsedRawTransaction) for transaction in transactions)
+        ):
+            raise ImportRepositoryError("invalid_parser_output")
+        return self._store_prevalidated_document(
+            document=document,
+            filename=filename,
+            declared_mime_type=declared_mime_type,
+            parser_id=parser_id,
+            parser_version=parser_version,
+            transactions=transactions,
+        )
+
+    def record_isolated_parse_error(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser_id: str,
+        parser_version: str,
+        code: str,
+    ) -> None:
+        """Record a safe error returned by the isolated parser worker."""
+        self._record_error(
+            document_sha256=sha256(document).hexdigest(),
+            filename=filename,
+            declared_mime_type=declared_mime_type,
+            parser_id=parser_id,
+            parser_version=parser_version,
+            code=code,
+        )
+
     def _import_prevalidated_document(
         self,
         *,
@@ -259,6 +310,26 @@ class ImportRepository:
         filename: str,
         declared_mime_type: str,
         parser: StatementParser,
+    ) -> ImportResult:
+        return self._store_prevalidated_document(
+            document=document,
+            filename=filename,
+            declared_mime_type=declared_mime_type,
+            parser_id=parser.parser_id,
+            parser_version=parser.version,
+            parser=parser,
+        )
+
+    def _store_prevalidated_document(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser_id: str,
+        parser_version: str,
+        transactions: list[ParsedRawTransaction] | None = None,
+        parser: StatementParser | None = None,
     ) -> ImportResult:
         document_sha256 = sha256(document).hexdigest()
         storage_filename = f"{document_sha256}{_extension_for(declared_mime_type)}"
@@ -277,6 +348,9 @@ class ImportRepository:
                 document=document,
                 filename=filename,
                 declared_mime_type=declared_mime_type,
+                parser_id=parser_id,
+                parser_version=parser_version,
+                transactions=transactions,
                 parser=parser,
                 document_sha256=document_sha256,
                 storage_filename=storage_filename,
@@ -320,7 +394,10 @@ class ImportRepository:
         document: bytes,
         filename: str,
         declared_mime_type: str,
-        parser: StatementParser,
+        parser_id: str,
+        parser_version: str,
+        transactions: list[ParsedRawTransaction] | None,
+        parser: StatementParser | None,
         document_sha256: str,
         storage_filename: str,
         final_path: Path,
@@ -341,7 +418,7 @@ class ImportRepository:
                   AND r.parser_id = ?
                   AND r.parser_version = ?
                 """,
-                [document_sha256, parser.parser_id, parser.version],
+                [document_sha256, parser_id, parser_version],
             ).fetchone()
         if existing is not None:
             try:
@@ -355,7 +432,8 @@ class ImportRepository:
                     document_sha256=document_sha256,
                     filename=filename,
                     declared_mime_type=declared_mime_type,
-                    parser=parser,
+                    parser_id=parser_id,
+                    parser_version=parser_version,
                     code="storage_failed",
                 )
                 raise ImportRepositoryError("storage_failed") from None
@@ -366,26 +444,31 @@ class ImportRepository:
                 was_already_imported=True,
             )
 
-        try:
-            transactions = parser.parse(document)
-        except StatementParserError as error:
-            self._record_error(
-                document_sha256=document_sha256,
-                filename=filename,
-                declared_mime_type=declared_mime_type,
-                parser=parser,
-                code=error.code.value,
-            )
-            raise ImportRepositoryError(error.code.value) from None
-        except Exception:  # noqa: BLE001
-            self._record_error(
-                document_sha256=document_sha256,
-                filename=filename,
-                declared_mime_type=declared_mime_type,
-                parser=parser,
-                code="parser_failed",
-            )
-            raise ImportRepositoryError("parser_failed") from None
+        if transactions is None:
+            if parser is None:
+                raise ImportRepositoryError("invalid_parser_output")
+            try:
+                transactions = parser.parse(document)
+            except StatementParserError as error:
+                self._record_error(
+                    document_sha256=document_sha256,
+                    filename=filename,
+                    declared_mime_type=declared_mime_type,
+                    parser_id=parser_id,
+                    parser_version=parser_version,
+                    code=error.code.value,
+                )
+                raise ImportRepositoryError(error.code.value) from None
+            except Exception:  # noqa: BLE001
+                self._record_error(
+                    document_sha256=document_sha256,
+                    filename=filename,
+                    declared_mime_type=declared_mime_type,
+                    parser_id=parser_id,
+                    parser_version=parser_version,
+                    code="parser_failed",
+                )
+                raise ImportRepositoryError("parser_failed") from None
         document_id = uuid4()
         run_id = uuid4()
         try:
@@ -395,7 +478,8 @@ class ImportRepository:
                 document_sha256=document_sha256,
                 filename=filename,
                 declared_mime_type=declared_mime_type,
-                parser=parser,
+                parser_id=parser_id,
+                parser_version=parser_version,
                 code="storage_failed",
             )
             raise ImportRepositoryError("storage_failed") from None
@@ -455,8 +539,8 @@ class ImportRepository:
                         [
                             run_id,
                             document_id,
-                            parser.parser_id,
-                            parser.version,
+                            parser_id,
+                            parser_version,
                         ],
                     )
                     connection.execute(
@@ -528,7 +612,8 @@ class ImportRepository:
                 document_sha256=document_sha256,
                 filename=filename,
                 declared_mime_type=declared_mime_type,
-                parser=parser,
+                parser_id=parser_id,
+                parser_version=parser_version,
                 code="storage_failed",
             )
             raise ImportRepositoryError("storage_failed") from None
@@ -578,7 +663,8 @@ class ImportRepository:
         document_sha256: str,
         filename: str,
         declared_mime_type: str,
-        parser: StatementParser,
+        parser_id: str,
+        parser_version: str,
         code: str,
     ) -> None:
         with (
@@ -604,8 +690,8 @@ class ImportRepository:
                     document_sha256,
                     filename,
                     declared_mime_type,
-                    parser.parser_id,
-                    parser.version,
+                    parser_id,
+                    parser_version,
                     code,
                     code,
                 ],

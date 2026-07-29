@@ -11,4 +11,5 @@
 - **Source amount**: The signed amount representation used by an input statement. It remains part of the raw transaction and is not the canonical money representation.
 - **Account identity**: A stable local identifier that keeps transactions from different statement accounts distinct. It is not an online banking connection.
 - **Import run**: One attempt to parse a source document record with a particular parser version.
+- **Safe statement ingress**: `IngestionService.import_document` is the only production entry point for untrusted statement bytes. It validates input, isolates parser work, and hands typed parser output to storage. Native PDF and OCR helpers are private to that worker boundary.
 - **Lineage**: The links from a displayed or derived value back to its source document, page or row, extraction method, and version.

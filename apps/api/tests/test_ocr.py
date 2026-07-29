@@ -14,9 +14,9 @@ from spend_memory.ingestion.ocr import (
     OcrError,
     OcrErrorCode,
     OcrLimits,
-    extract_pdf_page_text,
+    _extract_pdf_page_text_in_worker,
+    _run_tesseract,
     normalize_ocr_amount_token,
-    run_tesseract,
 )
 from spend_memory.ingestion.parsers.synthetic_pdf_a import SyntheticAedTabularPdfParser
 from spend_memory.ingestion.registry import ParserRegistry
@@ -43,10 +43,17 @@ def _blank_pdf(*, pages: int = 1, width: float = 595, height: float = 842) -> by
     return result
 
 
+def test_raw_pdf_ocr_has_no_public_entry_point() -> None:
+    assert not hasattr(ocr, "extract_pdf_page_text")
+    assert not hasattr(ocr, "run_tesseract")
+    assert callable(ocr._extract_pdf_page_text_in_worker)
+    assert callable(ocr._run_tesseract)
+
+
 def test_embedded_text_on_every_page_skips_tesseract() -> None:
     calls: list[bytes] = []
 
-    result = extract_pdf_page_text(
+    result = _extract_pdf_page_text_in_worker(
         _text_pdf("page has usable text"),
         runner=lambda image, timeout: calls.append(image) or "unexpected OCR",
     )
@@ -65,7 +72,7 @@ def test_only_textless_pages_use_tesseract_and_ocr_text_is_separate() -> None:
     document.close()
     original_hash = sha256(original).hexdigest()
 
-    result = extract_pdf_page_text(
+    result = _extract_pdf_page_text_in_worker(
         original,
         runner=lambda image, timeout: "OCR second page\n",
     )
@@ -89,9 +96,9 @@ def test_ocr_passes_the_effective_render_dpi_to_tesseract(monkeypatch) -> None:
         observed_dpi.append(dpi)
         return "OCR text"
 
-    monkeypatch.setattr(ocr, "run_tesseract", record_tesseract)
+    monkeypatch.setattr(ocr, "_run_tesseract", record_tesseract)
 
-    extract_pdf_page_text(
+    _extract_pdf_page_text_in_worker(
         _blank_pdf(),
         limits=OcrLimits(render_dpi=144),
     )
@@ -119,7 +126,7 @@ def test_ocr_rejects_page_limit_before_text_extraction_or_rendering(monkeypatch)
     )
 
     with pytest.raises(OcrError) as caught:
-        extract_pdf_page_text(
+        _extract_pdf_page_text_in_worker(
             _blank_pdf(pages=2),
             limits=OcrLimits(max_pages=1),
             runner=runner,
@@ -145,7 +152,7 @@ def test_ocr_rejects_over_limit_geometry_before_text_extraction_or_rendering(
     )
 
     with pytest.raises(OcrError) as caught:
-        extract_pdf_page_text(
+        _extract_pdf_page_text_in_worker(
             _blank_pdf(width=1_000, height=1_000),
             limits=OcrLimits(render_dpi=144, max_image_width=1_999),
             runner=lambda image, timeout: pytest.fail("Tesseract must not run"),
@@ -172,7 +179,7 @@ def test_ocr_deadline_covers_embedded_text_extraction(monkeypatch) -> None:
     )
 
     with pytest.raises(OcrError) as caught:
-        extract_pdf_page_text(
+        _extract_pdf_page_text_in_worker(
             _text_pdf("page has usable text"),
             limits=OcrLimits(timeout_seconds=1.0),
         )
@@ -193,7 +200,7 @@ def test_ocr_deadline_covers_page_rendering(monkeypatch) -> None:
     monkeypatch.setattr(fitz.Page, "get_pixmap", slow_get_pixmap)
 
     with pytest.raises(OcrError) as caught:
-        extract_pdf_page_text(
+        _extract_pdf_page_text_in_worker(
             _blank_pdf(),
             limits=OcrLimits(timeout_seconds=1.0),
             runner=lambda image, timeout: pytest.fail(
@@ -217,7 +224,7 @@ def test_ocr_enforces_rendered_image_limits_before_tesseract(
     expected_code: OcrErrorCode,
 ) -> None:
     with pytest.raises(OcrError) as caught:
-        extract_pdf_page_text(
+        _extract_pdf_page_text_in_worker(
             _blank_pdf(),
             limits=limits,
             runner=lambda image, timeout: pytest.fail("Tesseract must not run"),
@@ -237,7 +244,7 @@ def test_tesseract_timeout_is_mapped_to_a_safe_error(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", time_out)
 
     with pytest.raises(OcrError) as caught:
-        run_tesseract(b"png bytes", timeout_seconds=0.01)
+        _run_tesseract(b"png bytes", timeout_seconds=0.01)
 
     assert caught.value.code is OcrErrorCode.TIMEOUT
     assert str(caught.value) == "ocr_timeout"
@@ -261,7 +268,7 @@ def test_tesseract_failure_is_safe_and_invocation_uses_an_argument_list(monkeypa
     monkeypatch.setattr(subprocess, "run", fail)
 
     with pytest.raises(OcrError) as caught:
-        run_tesseract(b"png bytes", timeout_seconds=2.5)
+        _run_tesseract(b"png bytes", timeout_seconds=2.5)
 
     assert caught.value.code is OcrErrorCode.ENGINE
     assert str(caught.value) == "ocr_engine"
@@ -356,7 +363,7 @@ def test_registry_selects_the_synthetic_parser_for_its_image_only_fixture() -> N
 
 def test_registry_selection_then_parse_invokes_tesseract_once(monkeypatch) -> None:
     invocations = 0
-    original_run_tesseract = ocr.run_tesseract
+    original_run_tesseract = ocr._run_tesseract
 
     def counting_run_tesseract(
         image: bytes,
@@ -368,7 +375,7 @@ def test_registry_selection_then_parse_invokes_tesseract_once(monkeypatch) -> No
         invocations += 1
         return original_run_tesseract(image, timeout_seconds, dpi=dpi)
 
-    monkeypatch.setattr(ocr, "run_tesseract", counting_run_tesseract)
+    monkeypatch.setattr(ocr, "_run_tesseract", counting_run_tesseract)
     registry = ParserRegistry([SyntheticAedTabularPdfParser()])
 
     transactions = registry._parse_for_tests(

@@ -307,6 +307,45 @@ def test_ingress_selects_parser_only_after_validation_and_persists_result(
     assert validation_calls == 1
 
 
+def test_ingress_persists_only_isolated_typed_parser_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _Parser()
+    service = _service(tmp_path, parser)
+    persisted: dict[str, object] = {}
+    real_store = service.repository.store_preparsed_document
+
+    def record_store(**kwargs):
+        persisted.update(kwargs)
+        return real_store(**kwargs)
+
+    monkeypatch.setattr(service.repository, "store_preparsed_document", record_store)
+
+    result = service.import_document(
+        document=b"valid text",
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+    )
+
+    assert result.transaction_count == 1
+    assert persisted["parser_id"] == parser.parser_id
+    assert persisted["parser_version"] == parser.version
+    assert persisted["transactions"] == [
+        ParsedRawTransaction(
+            date_text="2026-01-01",
+            description_text="Test purchase",
+            amount_text="-1200",
+            currency_text="AED",
+            source_page=None,
+            source_row=2,
+            source_text="2026-01-01,Test purchase,-1200",
+            extraction_method="delimited_text",
+        )
+    ]
+    assert "parser" not in persisted
+
+
 def _assert_process_is_gone(process_id_path: Path) -> None:
     process_id = int(process_id_path.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 1

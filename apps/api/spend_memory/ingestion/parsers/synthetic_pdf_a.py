@@ -9,7 +9,7 @@ from spend_memory.ingestion.base import ParsedRawTransaction
 from spend_memory.ingestion.ocr import (
     OcrError,
     OcrErrorCode,
-    extract_pdf_page_text,
+    _extract_pdf_page_text_in_worker,
     normalize_ocr_amount_token,
 )
 from spend_memory.ingestion.registry import ParserErrorCode, StatementParserError
@@ -40,7 +40,7 @@ class SyntheticAedTabularPdfParser:
 
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         try:
-            extracted = extract_pdf_page_text(document)
+            extracted = _extract_pdf_page_text_in_worker(document)
             if _TITLE not in extracted.page_text[0]:
                 raise StatementParserError(ParserErrorCode.MALFORMED)
             ocr_by_page = {page.page_number: page for page in extracted.ocr_pages}
