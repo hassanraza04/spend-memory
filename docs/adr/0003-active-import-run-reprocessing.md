@@ -13,6 +13,9 @@ the same document.
 
 An exact retry with the same document, parser ID, and parser version must also be
 idempotent. It may arrive after a newer parser version has already become active.
+The caller knows that parser identity from the import it is retrying. Selecting a
+parser from an untrusted document would itself require unsafe work before the
+idempotency check.
 
 ## Decision
 
@@ -20,6 +23,11 @@ The SHA-256 digest of the original bytes identifies a source document. A success
 combination of source document, parser ID, and parser version has one import run.
 An exact retry returns that stored run without invoking the parser, inserting raw
 transactions, or changing which run is active.
+
+The production ingress accepts the known parser ID and version for an exact retry
+and checks storage after validation but before it starts the isolated parser
+worker. A caller that does not have a known identity uses normal parser selection
+and parsing instead.
 
 A newly successful parser ID or version creates a new run and its source-faithful
 raw transactions. In the same DuckDB transaction, storage marks every older run

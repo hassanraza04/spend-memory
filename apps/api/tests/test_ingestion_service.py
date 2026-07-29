@@ -66,6 +66,23 @@ class _Parser:
         ]
 
 
+class _FileCountingParser(_Parser):
+    def __init__(self, detector_count_path: Path, parse_count_path: Path) -> None:
+        super().__init__()
+        self.detector_count_path = detector_count_path
+        self.parse_count_path = parse_count_path
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        with self.detector_count_path.open("a", encoding="utf-8") as count_file:
+            count_file.write("1\n")
+        return 1.0
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        with self.parse_count_path.open("a", encoding="utf-8") as count_file:
+            count_file.write("1\n")
+        return super().parse(document)
+
+
 class _BlockingDetector(_Parser):
     def __init__(self, process_id_path: Path) -> None:
         super().__init__()
@@ -305,6 +322,60 @@ def test_ingress_selects_parser_only_after_validation_and_persists_result(
 
     assert result.transaction_count == 1
     assert validation_calls == 1
+
+
+def test_ingress_exact_retry_skips_isolated_selection_and_parsing(
+    tmp_path: Path,
+) -> None:
+    detector_count_path = tmp_path / "detector-count.txt"
+    parse_count_path = tmp_path / "parse-count.txt"
+    parser = _FileCountingParser(detector_count_path, parse_count_path)
+    service = _service(tmp_path, parser)
+    request = {
+        "document": b"valid text",
+        "filename": "statement.csv",
+        "declared_mime_type": "text/csv",
+        "parser_id": parser.parser_id,
+        "parser_version": parser.version,
+    }
+
+    first = service.import_document(**request)
+    repeated = service.import_document(**request)
+
+    assert first.document_id == repeated.document_id
+    assert first.run_id == repeated.run_id
+    assert repeated.was_already_imported is True
+    assert detector_count_path.read_text(encoding="utf-8") == "1\n"
+    assert parse_count_path.read_text(encoding="utf-8") == "1\n"
+
+
+def test_ingress_new_supplied_parser_version_runs_a_new_import(
+    tmp_path: Path,
+) -> None:
+    first_parser = _Parser()
+    first_service = _service(tmp_path, first_parser)
+    request = {
+        "document": b"valid text",
+        "filename": "statement.csv",
+        "declared_mime_type": "text/csv",
+        "parser_id": first_parser.parser_id,
+        "parser_version": first_parser.version,
+    }
+    first = first_service.import_document(**request)
+
+    detector_count_path = tmp_path / "new-version-detector-count.txt"
+    parse_count_path = tmp_path / "new-version-parse-count.txt"
+    next_parser = _FileCountingParser(detector_count_path, parse_count_path)
+    next_parser.version = "2.0"
+    next_service = _service(tmp_path, next_parser)
+    rerun = next_service.import_document(
+        **{**request, "parser_version": next_parser.version}
+    )
+
+    assert rerun.was_already_imported is False
+    assert rerun.run_id != first.run_id
+    assert detector_count_path.read_text(encoding="utf-8") == "1\n"
+    assert parse_count_path.read_text(encoding="utf-8") == "1\n"
 
 
 def test_ingress_persists_only_isolated_typed_parser_output(

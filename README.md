@@ -52,6 +52,12 @@ persistence boundary for already isolated `ParsedRawTransaction` output. It
 never selects or runs a parser. Native PDF text extraction and Tesseract OCR
 helpers are private parser-worker helpers, not production entry points.
 
+When a caller retries a known parser result, it passes that parser's stable ID
+and version to `import_document`. Spend Memory then checks the document SHA-256
+and parser identity before starting a worker. An exact stored run is returned
+without parser detection or extraction. A new parser version proceeds through
+the normal isolated parsing path.
+
 ## Branch convention
 
 `main` remains stable. Normal work uses `feature/<short-name>`. Use isolated Git worktrees for parallel or high-risk changes. The tracked `.githooks/pre-push` hook rejects non-fast-forward pushes to `main`; enable it locally with:

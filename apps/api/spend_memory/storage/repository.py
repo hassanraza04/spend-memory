@@ -283,6 +283,81 @@ class ImportRepository:
             transactions=transactions,
         )
 
+    def find_existing_import(
+        self,
+        *,
+        document: bytes,
+        filename: str,
+        declared_mime_type: str,
+        parser_id: str,
+        parser_version: str,
+    ) -> ImportResult | None:
+        """Return an exact successful run without invoking a parser.
+
+        The caller supplies the parser identity because determining it from
+        untrusted statement bytes would require parser detection. An existing
+        result also verifies or repairs its private source file before it is
+        returned.
+        """
+        if not parser_id or not parser_version:
+            raise ImportRepositoryError("invalid_parser_identity")
+
+        document_sha256 = sha256(document).hexdigest()
+        final_path = self.data_directory / (
+            f"{document_sha256}{_extension_for(declared_mime_type)}"
+        )
+        import_key = (
+            str(self.database_path.resolve()),
+            str(self.data_directory.resolve()),
+            document_sha256,
+        )
+        with (
+            _import_gate(import_key),
+            _document_file_lock(self.data_directory.resolve(), document_sha256),
+        ):
+            with (
+                _database_write_lock(self.database_path),
+                duckdb.connect(str(self.database_path)) as connection,
+            ):
+                existing = connection.execute(
+                    """
+                    SELECT d.document_id, r.run_id,
+                           (SELECT count(*)
+                            FROM raw_transactions t
+                            WHERE t.import_run_id = r.run_id)
+                    FROM source_documents d
+                    JOIN import_runs r ON r.document_id = d.document_id
+                    WHERE d.sha256_hex = ?
+                      AND r.parser_id = ?
+                      AND r.parser_version = ?
+                    """,
+                    [document_sha256, parser_id, parser_version],
+                ).fetchone()
+            if existing is None:
+                return None
+            try:
+                self._ensure_document_file(
+                    document=document,
+                    document_sha256=document_sha256,
+                    final_path=final_path,
+                )
+            except Exception:  # noqa: BLE001
+                self._record_error(
+                    document_sha256=document_sha256,
+                    filename=filename,
+                    declared_mime_type=declared_mime_type,
+                    parser_id=parser_id,
+                    parser_version=parser_version,
+                    code="storage_failed",
+                )
+                raise ImportRepositoryError("storage_failed") from None
+            return ImportResult(
+                document_id=existing[0],
+                run_id=existing[1],
+                transaction_count=existing[2],
+                was_already_imported=True,
+            )
+
     def record_isolated_parse_error(
         self,
         *,
