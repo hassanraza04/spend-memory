@@ -18,6 +18,7 @@ import duckdb
 import fitz
 
 from spend_memory.ingestion.base import StatementParser
+from spend_memory.ingestion.registry import StatementParserError
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ImportLimits:
     max_pdf_page_width_points: float = 14_400
     max_pdf_page_height_points: float = 14_400
     pdf_preflight_timeout_seconds: float = 2.0
+    parser_timeout_seconds: float = 20.0
 
 
 DEFAULT_IMPORT_LIMITS = ImportLimits()
@@ -344,6 +346,15 @@ class ImportRepository:
 
         try:
             transactions = parser.parse(document)
+        except StatementParserError as error:
+            self._record_error(
+                document_sha256=document_sha256,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser=parser,
+                code=error.code.value,
+            )
+            raise ImportRepositoryError(error.code.value) from None
         except Exception:  # noqa: BLE001
             self._record_error(
                 document_sha256=document_sha256,

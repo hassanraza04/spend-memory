@@ -1,17 +1,40 @@
 from __future__ import annotations
 
+import json
+import multiprocessing
+import os
+import subprocess
+import sys
+import time
+from dataclasses import asdict
 from pathlib import Path
+from threading import Event
 
 import fitz
 import pytest
+from spend_memory.ingestion import registry as registry_module
 from spend_memory.ingestion.base import ParsedRawTransaction
-from spend_memory.ingestion.registry import ParserRegistry
+from spend_memory.ingestion.parsers.canonical_csv import CanonicalCsvParser
+from spend_memory.ingestion.parsers.synthetic_pdf_a import (
+    SyntheticAedTabularPdfParser,
+)
+from spend_memory.ingestion.parsers.synthetic_pdf_b import (
+    SyntheticPkrCompactPdfParser,
+)
+from spend_memory.ingestion.registry import (
+    ParserErrorCode,
+    ParserRegistry,
+    StatementParserError,
+)
 from spend_memory.ingestion.service import IngestionService
 from spend_memory.storage.repository import (
     ImportLimits,
     ImportRepository,
     ImportRepositoryError,
 )
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_DIRECTORY = REPOSITORY_ROOT / "sample_data/source"
 
 
 class _Parser:
@@ -42,13 +65,109 @@ class _Parser:
         ]
 
 
+class _BlockingDetector(_Parser):
+    def __init__(self, process_id_path: Path) -> None:
+        super().__init__()
+        self.process_id_path = process_id_path
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        self.process_id_path.write_text(str(os.getpid()), encoding="utf-8")
+        Event().wait()
+        return 1.0
+
+
+class _BlockingParser(_Parser):
+    def __init__(self, process_id_path: Path) -> None:
+        super().__init__()
+        self.process_id_path = process_id_path
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        self.process_id_path.write_text(str(os.getpid()), encoding="utf-8")
+        Event().wait()
+        return []
+
+
+class _StatefulParser(_Parser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.detected = False
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        self.detected = True
+        return 1.0
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        if not self.detected:
+            raise RuntimeError("detector state was lost")
+        return super().parse(document)
+
+
+class _BlockingDescendantParser(_Parser):
+    def __init__(
+        self,
+        worker_id_path: Path,
+        descendant_id_path: Path,
+    ) -> None:
+        super().__init__()
+        self.worker_id_path = worker_id_path
+        self.descendant_id_path = descendant_id_path
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        self.worker_id_path.write_text(str(os.getpid()), encoding="utf-8")
+        descendant_ready_path = self.descendant_id_path.with_suffix(".ready")
+        descendant = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import signal,sys,time;"
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+                    "open(sys.argv[1], 'w').write('ready');"
+                    "time.sleep(60)"
+                ),
+                str(descendant_ready_path),
+            ]
+        )
+        self.descendant_id_path.write_text(str(descendant.pid), encoding="utf-8")
+        ready_deadline = time.monotonic() + 5
+        while not descendant_ready_path.exists():
+            if time.monotonic() >= ready_deadline:
+                raise RuntimeError("descendant did not start")
+            time.sleep(0.01)
+        descendant.wait()
+        return []
+
+
+class _CrashingDetector(_Parser):
+    def can_parse(self, document: bytes, filename: str) -> float:
+        os._exit(17)
+
+
+class _CrashingParser(_Parser):
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        os._exit(17)
+
+
+class _UnpicklableParser(_Parser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.callback = lambda: None
+
+
 def _service(
-    tmp_path: Path, parser: _Parser, *, max_bytes: int = 1024
+    tmp_path: Path,
+    parser: _Parser,
+    *,
+    max_bytes: int = 1024,
+    parser_timeout_seconds: float = 20.0,
 ) -> IngestionService:
     repository = ImportRepository(
         database_path=tmp_path / "spend-memory.duckdb",
         data_directory=tmp_path / "data",
-        limits=ImportLimits(max_document_bytes=max_bytes),
+        limits=ImportLimits(
+            max_document_bytes=max_bytes,
+            parser_timeout_seconds=parser_timeout_seconds,
+        ),
     )
     return IngestionService(
         repository=repository,
@@ -134,8 +253,273 @@ def test_ingress_selects_parser_only_after_validation_and_persists_result(
 
     assert result.transaction_count == 1
     assert validation_calls == 1
-    assert parser.detection_calls == 1
-    assert parser.parse_calls == 1
+
+
+def _assert_process_is_gone(process_id_path: Path) -> None:
+    process_id = int(process_id_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            os.kill(process_id, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.01)
+    pytest.fail(f"process {process_id} is still alive")
+
+
+def _run_import_in_outer_process(
+    tmp_path: Path,
+    parser: _Parser,
+    parser_timeout_seconds: float,
+    result_connection,
+) -> None:
+    try:
+        service = _service(
+            tmp_path,
+            parser,
+            parser_timeout_seconds=parser_timeout_seconds,
+        )
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+    except StatementParserError as error:
+        payload = ("statement_parser_error", error.code.value)
+    except ImportRepositoryError as error:
+        payload = ("import_repository_error", error.code)
+    except BaseException:  # noqa: BLE001
+        payload = ("unexpected_error", None)
+    else:
+        payload = ("success", None)
+    try:
+        result_connection.send(payload)
+    finally:
+        result_connection.close()
+
+
+def _run_blocking_import(
+    tmp_path: Path,
+    parser: _Parser,
+    entered_path: Path,
+    *,
+    parser_timeout_seconds: float = 2.0,
+) -> tuple[str, str | None]:
+    process_context = multiprocessing.get_context("spawn")
+    receive_result, send_result = process_context.Pipe(duplex=False)
+    outer_process = process_context.Process(
+        target=_run_import_in_outer_process,
+        args=(
+            tmp_path,
+            parser,
+            parser_timeout_seconds,
+            send_result,
+        ),
+    )
+    try:
+        outer_process.start()
+        send_result.close()
+        entered_deadline = time.monotonic() + 5
+        while not entered_path.exists() and not receive_result.poll():
+            if time.monotonic() >= entered_deadline:
+                break
+            time.sleep(0.01)
+        assert entered_path.exists(), "blocking parser did not start"
+        outer_process.join(timeout=5)
+        if outer_process.is_alive():
+            outer_process.terminate()
+            outer_process.join(timeout=0.1)
+        if outer_process.is_alive():
+            outer_process.kill()
+            outer_process.join(timeout=0.1)
+        assert not outer_process.is_alive(), "outer import process did not stop"
+        assert outer_process.exitcode == 0
+        assert receive_result.poll()
+        return receive_result.recv()
+    finally:
+        send_result.close()
+        receive_result.close()
+        if outer_process.is_alive():
+            outer_process.kill()
+            outer_process.join(timeout=0.1)
+        if not outer_process.is_alive():
+            outer_process.close()
+
+
+def test_ingress_kills_a_blocked_detector_at_the_parser_deadline(
+    tmp_path: Path,
+) -> None:
+    process_id_path = tmp_path / "detector.pid"
+
+    started_at = time.monotonic()
+    error_type, error_code = _run_blocking_import(
+        tmp_path,
+        _BlockingDetector(process_id_path),
+        process_id_path,
+    )
+
+    assert error_type == "statement_parser_error"
+    assert error_code == ParserErrorCode.TIME_LIMIT.value
+    assert time.monotonic() - started_at < 5
+    _assert_process_is_gone(process_id_path)
+
+
+def test_ingress_kills_a_blocked_parser_at_the_parser_deadline(
+    tmp_path: Path,
+) -> None:
+    process_id_path = tmp_path / "parser.pid"
+    started_at = time.monotonic()
+    error_type, error_code = _run_blocking_import(
+        tmp_path,
+        _BlockingParser(process_id_path),
+        process_id_path,
+    )
+
+    assert error_type == "import_repository_error"
+    assert error_code == "time_limit"
+    assert time.monotonic() - started_at < 5
+    _assert_process_is_gone(process_id_path)
+
+
+def test_ingress_kills_parser_descendants_at_the_parser_deadline(
+    tmp_path: Path,
+) -> None:
+    worker_id_path = tmp_path / "worker.pid"
+    descendant_id_path = tmp_path / "descendant.pid"
+    descendant_ready_path = descendant_id_path.with_suffix(".ready")
+    parser = _BlockingDescendantParser(
+        worker_id_path,
+        descendant_id_path,
+    )
+    error_type, error_code = _run_blocking_import(
+        tmp_path,
+        parser,
+        descendant_ready_path,
+    )
+
+    assert error_type == "import_repository_error"
+    assert error_code == "time_limit"
+    _assert_process_is_gone(worker_id_path)
+    _assert_process_is_gone(descendant_id_path)
+
+
+def test_isolated_parser_preserves_detector_state_through_parse() -> None:
+    registry = ParserRegistry([_StatefulParser()])
+
+    parser = registry.select_isolated(
+        b"valid text",
+        "statement.csv",
+        timeout_seconds=5,
+    )
+    transactions = parser.parse(b"valid text")
+
+    assert len(transactions) == 1
+
+
+def test_result_reconstruction_cannot_return_success_after_the_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result_path = tmp_path / "parse.json"
+    transaction = _Parser().parse(b"valid text")[0]
+    result_path.write_text(
+        "\n".join(
+            (
+                json.dumps({"status": "parsed"}),
+                json.dumps(asdict(transaction)),
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    clock_values = iter((0.0, 0.0, 0.0, 2.0))
+    monkeypatch.setattr(
+        registry_module,
+        "monotonic",
+        lambda: next(clock_values, 2.0),
+    )
+
+    with pytest.raises(StatementParserError) as caught:
+        registry_module._decode_transactions(result_path, deadline=1.0)
+
+    assert caught.value.code is ParserErrorCode.TIME_LIMIT
+
+
+def test_ingress_maps_a_crashed_detector_to_a_safe_malformed_error(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path, _CrashingDetector())
+
+    with pytest.raises(StatementParserError) as caught:
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+
+    assert caught.value.code is ParserErrorCode.MALFORMED
+    assert str(caught.value) == "malformed"
+    assert caught.value.__cause__ is None
+
+
+def test_ingress_maps_a_crashed_parser_to_a_safe_malformed_error(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path, _CrashingParser())
+
+    with pytest.raises(ImportRepositoryError) as caught:
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+
+    assert caught.value.code == "malformed"
+    assert str(caught.value) == "malformed"
+    assert caught.value.__cause__ is None
+
+
+def test_isolated_registry_rejects_an_unserializable_parser_safely() -> None:
+    registry = ParserRegistry([_UnpicklableParser()])
+
+    with pytest.raises(StatementParserError) as caught:
+        registry.select_isolated(
+            b"valid text",
+            "statement.csv",
+            timeout_seconds=5,
+        )
+
+    assert caught.value.code is ParserErrorCode.MALFORMED
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_transaction_count"),
+    (
+        ("aed_january_2026.csv", 18),
+        ("aed_statement_tabular.pdf", 414),
+        ("pkr_statement_compact.pdf", 432),
+        ("aed_statement_image_only.pdf", 1),
+    ),
+)
+def test_isolated_parser_boundary_preserves_csv_pdf_and_ocr_results(
+    filename: str,
+    expected_transaction_count: int,
+) -> None:
+    document = (SOURCE_DIRECTORY / filename).read_bytes()
+    registry = ParserRegistry(
+        [
+            CanonicalCsvParser(),
+            SyntheticAedTabularPdfParser(),
+            SyntheticPkrCompactPdfParser(),
+        ]
+    )
+
+    parser = registry.select_isolated(document, filename, timeout_seconds=20)
+    transactions = parser.parse(document)
+
+    assert len(transactions) == expected_transaction_count
+    assert all(isinstance(transaction, ParsedRawTransaction) for transaction in transactions)
 
 
 def test_ingress_classifies_a_real_encrypted_pdf_before_parser_selection(

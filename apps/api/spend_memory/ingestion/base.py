@@ -24,6 +24,12 @@ class ParsedRawTransaction:
 
 
 class StatementParser(Protocol):
+    """Immutable parser contract used across a spawned local worker boundary.
+
+    Implementations registered for service ingestion must be serializable by
+    Python's standard ``pickle`` module and multiprocessing ``spawn`` context.
+    """
+
     parser_id: str
     version: str
 

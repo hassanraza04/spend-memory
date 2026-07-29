@@ -25,10 +25,17 @@ class IngestionService:
             filename=filename,
             declared_mime_type=declared_mime_type,
         )
-        parser = self.parser_registry.select(document, filename)
-        return self.repository._import_prevalidated_document(
-            document=document,
-            filename=filename,
-            declared_mime_type=declared_mime_type,
-            parser=parser,
+        parser = self.parser_registry.select_isolated(
+            document,
+            filename,
+            timeout_seconds=self.repository.limits.parser_timeout_seconds,
         )
+        try:
+            return self.repository._import_prevalidated_document(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser=parser,
+            )
+        finally:
+            parser.close()

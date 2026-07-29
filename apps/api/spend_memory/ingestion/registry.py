@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import json
+import multiprocessing
+import os
+import pickle
+import signal
 from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from time import monotonic
+from typing import Any
 
 import fitz
 
@@ -13,6 +23,7 @@ class ParserErrorCode(str, Enum):
     ENCRYPTED = "encrypted"
     MALFORMED = "malformed"
     AMBIGUOUS = "ambiguous"
+    TIME_LIMIT = "time_limit"
 
 
 class StatementParserError(Exception):
@@ -58,6 +69,413 @@ class ParserRegistry:
             raise
         except Exception:  # noqa: BLE001
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
+
+    def select_isolated(
+        self,
+        document: bytes,
+        filename: str,
+        *,
+        timeout_seconds: float,
+    ) -> _IsolatedStatementParser:
+        deadline = monotonic() + timeout_seconds
+        cleanup_reserve_seconds = min(0.25, max(0, timeout_seconds * 0.2))
+        work_deadline = deadline - cleanup_reserve_seconds
+        if work_deadline <= monotonic():
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+
+        parsers = tuple(self._parsers)
+        try:
+            pickle.dumps(parsers, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:  # noqa: BLE001
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None
+        process_context = multiprocessing.get_context("spawn")
+        session_ready = process_context.Event()
+        selection_ready = process_context.Event()
+        parse_ready = process_context.Event()
+        receive_command, send_command = process_context.Pipe(duplex=False)
+        result_directory = TemporaryDirectory(prefix="spend-memory-parser-")
+        selection_path = Path(result_directory.name) / "selection.json"
+        parse_path = Path(result_directory.name) / "parse.json"
+        worker = process_context.Process(
+            target=_parser_worker,
+            args=(
+                parsers,
+                document,
+                filename,
+                receive_command,
+                session_ready,
+                selection_ready,
+                parse_ready,
+                selection_path,
+                parse_path,
+            ),
+        )
+        handle = _ParserWorkerHandle(
+            worker=worker,
+            send_command=send_command,
+            session_ready=session_ready,
+            selection_ready=selection_ready,
+            parse_ready=parse_ready,
+            selection_path=selection_path,
+            parse_path=parse_path,
+            result_directory=result_directory,
+            deadline=deadline,
+            work_deadline=work_deadline,
+        )
+        try:
+            worker.start()
+            receive_command.close()
+            _wait_for_worker_result(selection_ready, worker, work_deadline)
+            payload = _read_selection_result(selection_path, work_deadline)
+            if (
+                not isinstance(payload, dict)
+                or payload.get("status") != "selected"
+                or not isinstance(payload.get("parser_id"), str)
+                or not isinstance(payload.get("version"), str)
+            ):
+                _raise_worker_error(payload)
+            return _IsolatedStatementParser(
+                parser_id=payload["parser_id"],
+                version=payload["version"],
+                handle=handle,
+            )
+        except StatementParserError:
+            handle.close()
+            raise
+        except BaseException:  # noqa: BLE001
+            handle.close()
+            raise StatementParserError(ParserErrorCode.MALFORMED) from None
+        finally:
+            receive_command.close()
+
+
+@dataclass(frozen=True)
+class _IsolatedStatementParser:
+    parser_id: str
+    version: str
+    handle: _ParserWorkerHandle = field(repr=False, compare=False)
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        return 1.0
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        return self.handle.parse()
+
+    def close(self) -> None:
+        self.handle.close()
+
+
+@dataclass
+class _ParserWorkerHandle:
+    worker: Any
+    send_command: Any
+    session_ready: Any
+    selection_ready: Any
+    parse_ready: Any
+    selection_path: Path
+    parse_path: Path
+    result_directory: TemporaryDirectory[str]
+    deadline: float
+    work_deadline: float
+    closed: bool = False
+
+    def parse(self) -> list[ParsedRawTransaction]:
+        if self.closed:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        try:
+            if monotonic() >= self.work_deadline:
+                raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+            self.send_command.send_bytes(b"P")
+            _wait_for_worker_result(
+                self.parse_ready,
+                self.worker,
+                self.work_deadline,
+            )
+            return _decode_transactions(self.parse_path, self.work_deadline)
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.worker.is_alive():
+            try:
+                self.send_command.send_bytes(b"C")
+            except (BrokenPipeError, OSError):
+                pass
+            self.worker.join(timeout=_remaining_seconds(self.work_deadline))
+        _stop_worker(
+            self.worker,
+            session_ready=self.session_ready,
+            deadline=self.deadline,
+        )
+        self.send_command.close()
+        self.result_directory.cleanup()
+
+
+def _parser_worker(
+    parsers: tuple[StatementParser, ...],
+    document: bytes,
+    filename: str,
+    command_connection,
+    session_ready,
+    selection_ready,
+    parse_ready,
+    selection_path: Path,
+    parse_path: Path,
+) -> None:
+    try:
+        os.setsid()
+        session_ready.set()
+        try:
+            selected = ParserRegistry(parsers).select(document, filename)
+            selection_payload = {
+                "status": "selected",
+                "parser_id": selected.parser_id,
+                "version": selected.version,
+            }
+        except StatementParserError as error:
+            selection_payload = {"status": "error", "code": error.code.value}
+            selected = None
+        except BaseException:  # noqa: BLE001
+            selection_payload = {
+                "status": "error",
+                "code": ParserErrorCode.MALFORMED.value,
+            }
+            selected = None
+        _write_worker_result(selection_path, selection_payload)
+        selection_ready.set()
+        if selected is None:
+            return
+
+        try:
+            command = command_connection.recv_bytes(1)
+        except (EOFError, OSError):
+            return
+        if command != b"P":
+            return
+        try:
+            transactions = selected.parse(document)
+            if not isinstance(transactions, list) or not all(
+                isinstance(transaction, ParsedRawTransaction)
+                for transaction in transactions
+            ):
+                raise StatementParserError(ParserErrorCode.MALFORMED)
+            _write_transactions(parse_path, transactions)
+        except StatementParserError as error:
+            _write_worker_result(
+                parse_path,
+                {"status": "error", "code": error.code.value},
+            )
+        except BaseException:  # noqa: BLE001
+            _write_worker_result(
+                parse_path,
+                {
+                    "status": "error",
+                    "code": ParserErrorCode.MALFORMED.value,
+                },
+            )
+        parse_ready.set()
+    finally:
+        command_connection.close()
+
+
+def _write_worker_result(path: Path, payload: object) -> None:
+    try:
+        encoded = _encode_json_line(payload)
+        if len(encoded) > _MAX_WORKER_RECORD_BYTES:
+            raise ValueError
+    except (TypeError, ValueError):
+        encoded = b'{"status":"error","code":"malformed"}\n'
+    path.write_bytes(encoded)
+
+
+def _write_transactions(
+    path: Path,
+    transactions: list[ParsedRawTransaction],
+) -> None:
+    temporary_path = path.with_suffix(".tmp")
+    try:
+        total_bytes = 0
+        with temporary_path.open("wb") as result_file:
+            header = _encode_json_line({"status": "parsed"})
+            result_file.write(header)
+            total_bytes += len(header)
+            for transaction in transactions:
+                record = _encode_json_line(asdict(transaction))
+                if len(record) > _MAX_WORKER_RECORD_BYTES:
+                    raise ValueError
+                total_bytes += len(record)
+                if total_bytes > _MAX_WORKER_RESULT_BYTES:
+                    raise ValueError
+                result_file.write(record)
+        os.replace(temporary_path, path)
+    except (TypeError, ValueError):
+        temporary_path.unlink(missing_ok=True)
+        _write_worker_result(
+            path,
+            {"status": "error", "code": ParserErrorCode.MALFORMED.value},
+        )
+
+
+def _encode_json_line(payload: object) -> bytes:
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n"
+
+
+def _read_selection_result(path: Path, deadline: float) -> object:
+    try:
+        if monotonic() >= deadline:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        if path.stat().st_size > _MAX_WORKER_RECORD_BYTES:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        with path.open("rb") as result_file:
+            payload = _read_json_line(result_file, deadline)
+            if result_file.read(1):
+                raise StatementParserError(ParserErrorCode.MALFORMED)
+        if monotonic() >= deadline:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        return payload
+    except StatementParserError:
+        raise
+    except BaseException:  # noqa: BLE001
+        raise StatementParserError(ParserErrorCode.MALFORMED) from None
+
+
+def _decode_transactions(
+    path: Path,
+    deadline: float,
+) -> list[ParsedRawTransaction]:
+    try:
+        if monotonic() >= deadline:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        if path.stat().st_size > _MAX_WORKER_RESULT_BYTES:
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        result_file = path.open("rb")
+        if monotonic() >= deadline:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+    except StatementParserError:
+        raise
+    except BaseException:  # noqa: BLE001
+        raise StatementParserError(ParserErrorCode.MALFORMED) from None
+
+    expected_fields = {field.name for field in fields(ParsedRawTransaction)}
+    transactions: list[ParsedRawTransaction] = []
+    try:
+        with result_file:
+            header = _read_json_line(result_file, deadline)
+            if not isinstance(header, dict) or header.get("status") != "parsed":
+                _raise_worker_error(header)
+            while True:
+                if monotonic() >= deadline:
+                    raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+                encoded = result_file.readline(_MAX_WORKER_RECORD_BYTES + 1)
+                if monotonic() >= deadline:
+                    raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+                if not encoded:
+                    break
+                transaction = _decode_json_line(encoded, deadline)
+                if (
+                    not isinstance(transaction, dict)
+                    or set(transaction) != expected_fields
+                ):
+                    raise StatementParserError(ParserErrorCode.MALFORMED)
+                try:
+                    transactions.append(ParsedRawTransaction(**transaction))
+                except (TypeError, ValueError):
+                    raise StatementParserError(ParserErrorCode.MALFORMED) from None
+                if monotonic() >= deadline:
+                    raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        if monotonic() >= deadline:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        return transactions
+    except StatementParserError:
+        raise
+    except BaseException:  # noqa: BLE001
+        raise StatementParserError(ParserErrorCode.MALFORMED) from None
+
+
+def _read_json_line(result_file, deadline: float) -> object:
+    if monotonic() >= deadline:
+        raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+    encoded = result_file.readline(_MAX_WORKER_RECORD_BYTES + 1)
+    return _decode_json_line(encoded, deadline)
+
+
+def _decode_json_line(encoded: bytes, deadline: float) -> object:
+    if (
+        not encoded
+        or len(encoded) > _MAX_WORKER_RECORD_BYTES
+        or not encoded.endswith(b"\n")
+    ):
+        raise StatementParserError(ParserErrorCode.MALFORMED)
+    try:
+        payload = json.loads(encoded)
+    except BaseException:  # noqa: BLE001
+        raise StatementParserError(ParserErrorCode.MALFORMED) from None
+    if monotonic() >= deadline:
+        raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+    return payload
+
+
+def _stop_worker(worker, *, session_ready, deadline: float) -> None:
+    session_was_ready = session_ready.is_set()
+    if session_was_ready:
+        _signal_process_group(worker.pid, signal.SIGTERM)
+    elif worker.is_alive():
+        worker.terminate()
+    if worker.is_alive():
+        remaining_seconds = _remaining_seconds(deadline)
+        worker.join(timeout=min(0.1, remaining_seconds))
+    if session_was_ready:
+        _signal_process_group(worker.pid, signal.SIGKILL)
+    elif worker.is_alive():
+        worker.kill()
+    if worker.is_alive():
+        worker.join(timeout=_remaining_seconds(deadline))
+    if not worker.is_alive():
+        worker.close()
+
+
+def _signal_process_group(process_group_id: int, signal_number: int) -> None:
+    try:
+        os.killpg(process_group_id, signal_number)
+    except ProcessLookupError:
+        pass
+
+
+def _remaining_seconds(deadline: float) -> float:
+    return max(0, deadline - monotonic())
+
+
+def _wait_for_worker_result(result_ready, worker, deadline: float) -> None:
+    while True:
+        remaining_seconds = _remaining_seconds(deadline)
+        if remaining_seconds <= 0:
+            raise StatementParserError(ParserErrorCode.TIME_LIMIT)
+        if result_ready.wait(min(0.01, remaining_seconds)):
+            return
+        if not worker.is_alive():
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+
+
+def _raise_worker_error(payload: object) -> None:
+    if (
+        isinstance(payload, dict)
+        and payload.get("status") == "error"
+        and isinstance(payload.get("code"), str)
+    ):
+        try:
+            code = ParserErrorCode(payload["code"])
+        except ValueError:
+            pass
+        else:
+            raise StatementParserError(code)
+    raise StatementParserError(ParserErrorCode.MALFORMED)
+
+
+_MAX_WORKER_RECORD_BYTES = 1024 * 1024
+_MAX_WORKER_RESULT_BYTES = 64 * _MAX_WORKER_RECORD_BYTES
 
 
 def _raise_if_encrypted_pdf(document: bytes, filename: str) -> None:
