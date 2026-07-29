@@ -210,7 +210,7 @@ class ImportRepository:
         self.limits = limits
         apply_migrations(self.database_path)
 
-    def import_document(
+    def _import_document_for_tests(
         self,
         *,
         document: bytes,
@@ -218,6 +218,11 @@ class ImportRepository:
         declared_mime_type: str,
         parser: StatementParser,
     ) -> ImportResult:
+        """Direct parser path retained only for repository unit tests.
+
+        Public callers must use ``IngestionService.import_document`` so parser
+        detection and parsing are isolated behind an enforced deadline.
+        """
         self.validate_document(
             document=document,
             filename=filename,

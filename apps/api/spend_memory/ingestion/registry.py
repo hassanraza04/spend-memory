@@ -8,6 +8,7 @@ import signal
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
@@ -137,6 +138,7 @@ class ParserRegistry:
             return _IsolatedStatementParser(
                 parser_id=payload["parser_id"],
                 version=payload["version"],
+                document_sha256=sha256(document).hexdigest(),
                 handle=handle,
             )
         except StatementParserError:
@@ -153,12 +155,16 @@ class ParserRegistry:
 class _IsolatedStatementParser:
     parser_id: str
     version: str
+    document_sha256: str = field(repr=False, compare=False)
     handle: _ParserWorkerHandle = field(repr=False, compare=False)
 
     def can_parse(self, document: bytes, filename: str) -> float:
         return 1.0
 
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        if sha256(document).hexdigest() != self.document_sha256:
+            self.close()
+            raise StatementParserError(ParserErrorCode.MALFORMED)
         return self.handle.parse()
 
     def close(self) -> None:

@@ -77,6 +77,28 @@ def test_only_textless_pages_use_tesseract_and_ocr_text_is_separate() -> None:
     assert sha256(original).hexdigest() == original_hash
 
 
+def test_ocr_passes_the_effective_render_dpi_to_tesseract(monkeypatch) -> None:
+    observed_dpi: list[int] = []
+
+    def record_tesseract(
+        image: bytes,
+        timeout_seconds: float,
+        *,
+        dpi: int = 200,
+    ) -> str:
+        observed_dpi.append(dpi)
+        return "OCR text"
+
+    monkeypatch.setattr(ocr, "run_tesseract", record_tesseract)
+
+    extract_pdf_page_text(
+        _blank_pdf(),
+        limits=OcrLimits(render_dpi=144),
+    )
+
+    assert observed_dpi == [144]
+
+
 def test_ocr_rejects_page_limit_before_text_extraction_or_rendering(monkeypatch) -> None:
     called = False
 
@@ -336,10 +358,15 @@ def test_registry_selection_then_parse_invokes_tesseract_once(monkeypatch) -> No
     invocations = 0
     original_run_tesseract = ocr.run_tesseract
 
-    def counting_run_tesseract(image: bytes, timeout_seconds: float) -> str:
+    def counting_run_tesseract(
+        image: bytes,
+        timeout_seconds: float,
+        *,
+        dpi: int = 200,
+    ) -> str:
         nonlocal invocations
         invocations += 1
-        return original_run_tesseract(image, timeout_seconds)
+        return original_run_tesseract(image, timeout_seconds, dpi=dpi)
 
     monkeypatch.setattr(ocr, "run_tesseract", counting_run_tesseract)
     registry = ParserRegistry([SyntheticAedTabularPdfParser()])

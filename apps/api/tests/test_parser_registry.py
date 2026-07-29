@@ -54,6 +54,23 @@ def test_registry_rejects_unsupported_files() -> None:
     assert caught.value.code is ParserErrorCode.UNSUPPORTED
 
 
+def test_isolated_parser_rejects_bytes_other_than_the_selected_document() -> None:
+    registry = ParserRegistry([_Parser("csv", 1.0)])
+    parser = registry.select_isolated(
+        b"first statement",
+        "statement.csv",
+        timeout_seconds=2.0,
+    )
+
+    try:
+        with pytest.raises(StatementParserError) as caught:
+            parser.parse(b"different statement")
+    finally:
+        parser.close()
+
+    assert caught.value.code is ParserErrorCode.MALFORMED
+
+
 class _EncryptedParser(_Parser):
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         raise StatementParserError(ParserErrorCode.ENCRYPTED)

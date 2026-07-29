@@ -130,7 +130,14 @@ def extract_pdf_page_text(
                 _enforce_image_limits(pixmap.width, pixmap.height, limits)
                 image = pixmap.tobytes("png")
                 remaining_seconds = _remaining_seconds(deadline)
-                text = ocr_runner(image, remaining_seconds)
+                if runner is None:
+                    text = ocr_runner(
+                        image,
+                        remaining_seconds,
+                        dpi=limits.render_dpi,
+                    )
+                else:
+                    text = ocr_runner(image, remaining_seconds)
                 _remaining_seconds(deadline)
                 page_text[page_index] = text
                 ocr_pages.append(OcrPageText(page_number=page_index + 1, text=text))
@@ -146,13 +153,14 @@ def run_tesseract(
     timeout_seconds: float,
     *,
     executable: str = "tesseract",
+    dpi: int = 200,
 ) -> str:
     command = [
         executable,
         "stdin",
         "stdout",
         "--dpi",
-        "200",
+        str(dpi),
         "--psm",
         "6",
         "-l",

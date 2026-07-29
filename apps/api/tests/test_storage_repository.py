@@ -125,7 +125,7 @@ def _run_independent_process_import(
         return
 
     try:
-        result = store.import_document(
+        result = store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -168,7 +168,7 @@ def _run_distinct_document_process_import(
         return
 
     try:
-        result = store.import_document(
+        result = store._import_document_for_tests(
             document=document,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -192,6 +192,16 @@ def _pdf_with_pages(page_count: int) -> bytes:
         for _ in range(page_count):
             pdf.new_page()
         return pdf.tobytes()
+
+
+def test_repository_does_not_expose_an_unisolated_import_api(tmp_path: Path) -> None:
+    repository = _repository_module()
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+    )
+
+    assert not hasattr(store, "import_document")
 
 
 def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> None:
@@ -275,13 +285,13 @@ def test_source_document_identity_is_the_sha256_of_original_bytes(
         data_directory=tmp_path / "data",
     )
 
-    first = store.import_document(
+    first = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="first-name.csv",
         declared_mime_type="text/csv",
         parser=StubParser(version="1.0"),
     )
-    second = store.import_document(
+    second = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="another-name.csv",
         declared_mime_type="text/csv",
@@ -305,13 +315,13 @@ def test_same_document_and_parser_version_is_idempotent(tmp_path: Path) -> None:
     )
     parser = StubParser(version="1.0")
 
-    first = store.import_document(
+    first = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
         parser=parser,
     )
-    second = store.import_document(
+    second = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -353,7 +363,7 @@ def test_idempotent_retry_repairs_missing_or_corrupt_original_file(
         data_directory=tmp_path / "data",
     )
     parser = StubParser()
-    first = store.import_document(
+    first = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -365,7 +375,7 @@ def test_idempotent_retry_repairs_missing_or_corrupt_original_file(
     else:
         final_path.write_bytes(b"corrupt original")
 
-    repeated = store.import_document(
+    repeated = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -387,7 +397,7 @@ def test_new_parser_version_repairs_corrupt_original_file(
         database_path=tmp_path / "spend-memory.duckdb",
         data_directory=tmp_path / "data",
     )
-    store.import_document(
+    store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -396,7 +406,7 @@ def test_new_parser_version_repairs_corrupt_original_file(
     final_path = store.data_directory / f"{sha256(CSV_DOCUMENT).hexdigest()}.csv"
     final_path.write_bytes(b"corrupt original")
 
-    result = store.import_document(
+    result = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -416,7 +426,7 @@ def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
     parser = ConcurrentParser()
 
     def import_statement():
-        return store.import_document(
+        return store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -670,7 +680,7 @@ def test_concurrent_parser_versions_cannot_remove_a_successful_source_file(
 
     def import_failed_version():
         with pytest.raises(repository.ImportRepositoryError) as caught:
-            failing_store.import_document(
+            failing_store._import_document_for_tests(
                 document=CSV_DOCUMENT,
                 filename="statement.csv",
                 declared_mime_type="text/csv",
@@ -679,7 +689,7 @@ def test_concurrent_parser_versions_cannot_remove_a_successful_source_file(
         return caught.value.code
 
     def import_successful_version():
-        return successful_store.import_document(
+        return successful_store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -734,19 +744,19 @@ def test_new_parser_version_reprocesses_and_is_the_only_active_run(
         ],
     )
 
-    first = store.import_document(
+    first = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
         parser=version_one,
     )
-    second = store.import_document(
+    second = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
         parser=version_two,
     )
-    repeated_old_version = store.import_document(
+    repeated_old_version = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -826,7 +836,7 @@ def test_original_document_bytes_are_stored_under_a_sha_derived_filename(
         data_directory=tmp_path / "data",
     )
 
-    result = store.import_document(
+    result = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -872,7 +882,7 @@ def test_raw_amount_and_ocr_normalization_are_stored_separately(
         data_directory=tmp_path / "data",
     )
 
-    result = store.import_document(
+    result = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -902,7 +912,7 @@ def test_parser_failure_is_recorded_without_partial_import_data(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -959,7 +969,7 @@ def test_failed_reprocessing_does_not_replace_the_active_run(
         database_path=tmp_path / "spend-memory.duckdb",
         data_directory=tmp_path / "data",
     )
-    active = store.import_document(
+    active = store._import_document_for_tests(
         document=CSV_DOCUMENT,
         filename="statement.csv",
         declared_mime_type="text/csv",
@@ -967,7 +977,7 @@ def test_failed_reprocessing_does_not_replace_the_active_run(
     )
 
     with pytest.raises(repository.ImportRepositoryError):
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -1011,7 +1021,7 @@ def test_storage_failure_rolls_back_database_rows_and_source_file(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -1062,7 +1072,7 @@ def test_failure_after_final_file_move_removes_rows_and_source_file(
     monkeypatch.setattr(repository.os, "replace", move_then_fail)
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -1106,7 +1116,7 @@ def test_oversized_document_is_rejected_before_parser_or_persistence(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename="statement.csv",
             declared_mime_type="text/csv",
@@ -1153,7 +1163,7 @@ def test_mime_safeguards_reject_before_parser_or_persistence(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=document,
             filename="statement.csv",
             declared_mime_type=declared_mime_type,
@@ -1191,7 +1201,7 @@ def test_pdf_page_limit_is_checked_before_parser_or_persistence(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=_pdf_with_pages(2),
             filename="statement.pdf",
             declared_mime_type="application/pdf",
@@ -1236,7 +1246,7 @@ def test_path_traversal_filename_is_rejected_before_parser_or_persistence(
     )
 
     with pytest.raises(repository.ImportRepositoryError) as caught:
-        store.import_document(
+        store._import_document_for_tests(
             document=CSV_DOCUMENT,
             filename=filename,
             declared_mime_type="text/csv",
