@@ -4,9 +4,7 @@ import json
 import multiprocessing
 import os
 import pickle
-import resource
 import signal
-import sys
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -18,6 +16,7 @@ from typing import Any
 
 import fitz
 
+from spend_memory.ingestion import resource_limits
 from spend_memory.ingestion.base import ParsedRawTransaction, StatementParser
 
 
@@ -35,13 +34,6 @@ class StatementParserError(Exception):
     def __init__(self, code: ParserErrorCode) -> None:
         self.code = code
         super().__init__(code.value)
-
-
-@dataclass(frozen=True)
-class _WorkerResourceLimits:
-    cpu_seconds: int
-    address_space_bytes: int
-    max_open_files: int
 
 
 class ParserRegistry:
@@ -104,7 +96,7 @@ class ParserRegistry:
             or worker_max_open_files <= 0
         ):
             raise StatementParserError(ParserErrorCode.MALFORMED)
-        worker_resource_limits = _WorkerResourceLimits(
+        worker_resource_limits = resource_limits.ResourceLimits(
             cpu_seconds=worker_cpu_limit_seconds,
             address_space_bytes=worker_address_space_bytes,
             max_open_files=worker_max_open_files,
@@ -270,13 +262,13 @@ def _parser_worker(
     selection_path: Path,
     parse_path: Path,
     max_parsed_transactions: int,
-    worker_resource_limits: _WorkerResourceLimits,
+    worker_resource_limits: resource_limits.ResourceLimits,
 ) -> None:
     try:
         os.setsid()
         session_ready.set()
         try:
-            _apply_worker_resource_limits(worker_resource_limits)
+            resource_limits.apply_resource_limits(worker_resource_limits)
             selected = ParserRegistry(parsers).select(document, filename)
             selection_payload = {
                 "status": "selected",
@@ -510,27 +502,6 @@ def _signal_process_group(process_group_id: int, signal_number: int) -> None:
         os.killpg(process_group_id, signal_number)
     except ProcessLookupError:
         pass
-
-
-def _apply_worker_resource_limits(limits: _WorkerResourceLimits) -> None:
-    _set_soft_resource_limit(resource.RLIMIT_CPU, limits.cpu_seconds)
-    _set_soft_resource_limit(resource.RLIMIT_NOFILE, limits.max_open_files)
-    address_space_limit = getattr(resource, "RLIMIT_AS", None)
-    if sys.platform.startswith("linux") and address_space_limit is not None:
-        _set_soft_resource_limit(address_space_limit, limits.address_space_bytes)
-
-
-def _set_soft_resource_limit(resource_type: int, requested_limit: int) -> None:
-    try:
-        current_soft_limit, hard_limit = resource.getrlimit(resource_type)
-        effective_limit = requested_limit
-        if hard_limit != resource.RLIM_INFINITY:
-            effective_limit = min(effective_limit, hard_limit)
-        if current_soft_limit != resource.RLIM_INFINITY:
-            effective_limit = min(effective_limit, current_soft_limit)
-        resource.setrlimit(resource_type, (effective_limit, hard_limit))
-    except (OSError, ValueError):
-        return
 
 
 def _remaining_seconds(deadline: float) -> float:

@@ -34,13 +34,14 @@ make exact retries idempotent and protect original-file replacement. This is
 supported on macOS, Linux, and the Linux Docker runtime used by this project.
 Windows is not a supported local runtime.
 
-Statement parser detection and extraction run in a local spawned process. A
-worker has a 25 CPU-second limit and can hold at most 64 file descriptors. Linux
-workers also have a 1.5 GiB address-space limit. macOS does not apply
+PDF structural inspection, statement parser detection, and extraction run in
+local spawned processes. Each worker has a 25 CPU-second limit and can hold at
+most 64 file descriptors. Linux workers also have a 1.5 GiB address-space
+limit. macOS does not apply
 `RLIMIT_AS`: its Python runtime maps system shared memory before the worker
-starts, so the kernel rejects a lower address-space limit. Every worker result
-is capped at 10,000 transactions before the API reads it. Limit breaches return
-safe import errors and never expose parser details.
+starts, so the kernel rejects a lower address-space limit. Parser extraction
+results are capped at 10,000 transactions before the API reads them. Limit
+breaches return safe import errors and never expose parser details.
 
 ## Branch convention
 

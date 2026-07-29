@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import multiprocessing
+import resource
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
@@ -192,6 +194,24 @@ def _pdf_with_pages(page_count: int) -> bytes:
         for _ in range(page_count):
             pdf.new_page()
         return pdf.tobytes()
+
+
+def _report_effective_resource_limits(limits, result_queue) -> None:
+    from spend_memory.ingestion.resource_limits import apply_resource_limits
+
+    apply_resource_limits(limits)
+    resource_types = {
+        "cpu": resource.RLIMIT_CPU,
+        "open_files": resource.RLIMIT_NOFILE,
+    }
+    if hasattr(resource, "RLIMIT_AS"):
+        resource_types["address_space"] = resource.RLIMIT_AS
+    result_queue.put(
+        {
+            name: resource.getrlimit(resource_type)[0]
+            for name, resource_type in resource_types.items()
+        }
+    )
 
 
 def test_repository_does_not_expose_an_unisolated_import_api(tmp_path: Path) -> None:
@@ -1222,6 +1242,74 @@ def test_pdf_page_limit_is_checked_before_parser_or_persistence(
     assert parser.parse_calls == 0
     assert counts == (0, 0, 0)
     assert not store.data_directory.exists()
+
+
+def test_document_workers_apply_effective_resource_limits() -> None:
+    from spend_memory.ingestion.resource_limits import ResourceLimits
+
+    process_context = multiprocessing.get_context("spawn")
+    result_queue = process_context.Queue()
+    worker = process_context.Process(
+        target=_report_effective_resource_limits,
+        args=(
+            ResourceLimits(
+                cpu_seconds=25,
+                address_space_bytes=1_500 * 1024 * 1024,
+                max_open_files=64,
+            ),
+            result_queue,
+        ),
+    )
+
+    worker.start()
+    worker.join(timeout=5)
+
+    try:
+        assert worker.exitcode == 0
+        effective_limits = result_queue.get(timeout=1)
+        assert effective_limits["cpu"] <= 25
+        assert effective_limits["open_files"] <= 64
+        if sys.platform.startswith("linux"):
+            assert effective_limits["address_space"] <= 1_500 * 1024 * 1024
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
+        worker.close()
+
+
+def test_pdf_preflight_uses_the_parser_worker_resource_budget() -> None:
+    repository = _repository_module()
+
+    resource_limits = repository.ImportLimits(
+        parser_cpu_limit_seconds=7,
+        parser_address_space_bytes=256 * 1024 * 1024,
+        parser_max_open_files=12,
+    ).pdf_preflight_resource_limits()
+
+    assert resource_limits.cpu_seconds == 7
+    assert resource_limits.address_space_bytes == 256 * 1024 * 1024
+    assert resource_limits.max_open_files == 12
+
+
+def test_pdf_preflight_maps_memory_exhaustion_to_a_safe_resource_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository_module()
+    receive_result, send_result = multiprocessing.Pipe(duplex=False)
+    document = _pdf_with_pages(1)
+
+    def raise_memory_error(*args, **kwargs):
+        raise MemoryError
+
+    monkeypatch.setattr(repository.fitz, "open", raise_memory_error)
+    repository._pdf_preflight_worker(
+        document,
+        repository.DEFAULT_IMPORT_LIMITS,
+        send_result,
+    )
+
+    assert receive_result.recv() == "resource_limit"
+    receive_result.close()
 
 
 @pytest.mark.parametrize(

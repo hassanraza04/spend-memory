@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import multiprocessing
 import os
+import signal
 import stat
 import time
 from collections.abc import Iterator
@@ -19,6 +20,10 @@ import fitz
 
 from spend_memory.ingestion.base import StatementParser
 from spend_memory.ingestion.registry import StatementParserError
+from spend_memory.ingestion.resource_limits import (
+    ResourceLimits,
+    apply_resource_limits,
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +47,14 @@ class ImportLimits:
     parser_cpu_limit_seconds: int = 25
     parser_address_space_bytes: int = 1_500 * 1024 * 1024
     parser_max_open_files: int = 64
+
+    def pdf_preflight_resource_limits(self) -> ResourceLimits:
+        """Use the same worker budget for structural PDF inspection."""
+        return ResourceLimits(
+            cpu_seconds=self.parser_cpu_limit_seconds,
+            address_space_bytes=self.parser_address_space_bytes,
+            max_open_files=self.parser_max_open_files,
+        )
 
 
 DEFAULT_IMPORT_LIMITS = ImportLimits()
@@ -621,7 +634,7 @@ class ImportRepository:
                     worker.join()
                 raise ImportRepositoryError("pdf_preflight_timeout")
             if worker.exitcode != 0 or not receive_result.poll():
-                raise ImportRepositoryError("invalid_pdf")
+                raise ImportRepositoryError(_pdf_preflight_exit_error(worker))
             error_code = receive_result.recv()
         finally:
             send_result.close()
@@ -686,6 +699,7 @@ def _pdf_preflight_worker(
 ) -> None:
     error_code: str | None = None
     try:
+        apply_resource_limits(limits.pdf_preflight_resource_limits())
         with fitz.open(stream=document, filetype="pdf") as pdf:
             if pdf.needs_pass:
                 error_code = "encrypted"
@@ -703,9 +717,25 @@ def _pdf_preflight_worker(
                     ):
                         error_code = "pdf_page_dimensions"
                         break
+    except MemoryError:
+        error_code = "resource_limit"
     except (fitz.FileDataError, RuntimeError, ValueError):
         error_code = "invalid_pdf"
     try:
         result_connection.send(error_code)
     finally:
         result_connection.close()
+
+
+def _pdf_preflight_exit_error(worker) -> str:
+    resource_signals = {
+        -signal_number
+        for signal_number in (
+            getattr(signal, "SIGXCPU", None),
+            getattr(signal, "SIGKILL", None),
+        )
+        if signal_number is not None
+    }
+    if worker.exitcode in resource_signals:
+        return "resource_limit"
+    return "invalid_pdf"
