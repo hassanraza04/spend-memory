@@ -29,6 +29,10 @@ class IngestionService:
             document,
             filename,
             timeout_seconds=self.repository.limits.parser_timeout_seconds,
+            max_parsed_transactions=self.repository.limits.max_parsed_transactions,
+            worker_cpu_limit_seconds=self.repository.limits.parser_cpu_limit_seconds,
+            worker_address_space_bytes=self.repository.limits.parser_address_space_bytes,
+            worker_max_open_files=self.repository.limits.parser_max_open_files,
         )
         try:
             return self.repository._import_prevalidated_document(

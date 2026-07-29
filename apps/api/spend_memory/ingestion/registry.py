@@ -4,7 +4,9 @@ import json
 import multiprocessing
 import os
 import pickle
+import resource
 import signal
+import sys
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -25,12 +27,21 @@ class ParserErrorCode(str, Enum):
     MALFORMED = "malformed"
     AMBIGUOUS = "ambiguous"
     TIME_LIMIT = "time_limit"
+    TRANSACTION_LIMIT = "transaction_limit"
+    RESOURCE_LIMIT = "resource_limit"
 
 
 class StatementParserError(Exception):
     def __init__(self, code: ParserErrorCode) -> None:
         self.code = code
         super().__init__(code.value)
+
+
+@dataclass(frozen=True)
+class _WorkerResourceLimits:
+    cpu_seconds: int
+    address_space_bytes: int
+    max_open_files: int
 
 
 class ParserRegistry:
@@ -48,6 +59,8 @@ class ParserRegistry:
             ]
         except StatementParserError:
             raise
+        except MemoryError:
+            raise StatementParserError(ParserErrorCode.RESOURCE_LIMIT) from None
         except Exception:  # noqa: BLE001
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
         compatible = [
@@ -68,6 +81,8 @@ class ParserRegistry:
             return self.select(document, filename).parse(document)
         except StatementParserError:
             raise
+        except MemoryError:
+            raise StatementParserError(ParserErrorCode.RESOURCE_LIMIT) from None
         except Exception:  # noqa: BLE001
             raise StatementParserError(ParserErrorCode.MALFORMED) from None
 
@@ -77,7 +92,23 @@ class ParserRegistry:
         filename: str,
         *,
         timeout_seconds: float,
+        max_parsed_transactions: int = 10_000,
+        worker_cpu_limit_seconds: int = 25,
+        worker_address_space_bytes: int = 1_500 * 1024 * 1024,
+        worker_max_open_files: int = 64,
     ) -> _IsolatedStatementParser:
+        if (
+            max_parsed_transactions < 0
+            or worker_cpu_limit_seconds <= 0
+            or worker_address_space_bytes <= 0
+            or worker_max_open_files <= 0
+        ):
+            raise StatementParserError(ParserErrorCode.MALFORMED)
+        worker_resource_limits = _WorkerResourceLimits(
+            cpu_seconds=worker_cpu_limit_seconds,
+            address_space_bytes=worker_address_space_bytes,
+            max_open_files=worker_max_open_files,
+        )
         deadline = monotonic() + timeout_seconds
         cleanup_reserve_seconds = min(0.25, max(0, timeout_seconds * 0.2))
         work_deadline = deadline - cleanup_reserve_seconds
@@ -109,6 +140,8 @@ class ParserRegistry:
                 parse_ready,
                 selection_path,
                 parse_path,
+                max_parsed_transactions,
+                worker_resource_limits,
             ),
         )
         handle = _ParserWorkerHandle(
@@ -122,6 +155,7 @@ class ParserRegistry:
             result_directory=result_directory,
             deadline=deadline,
             work_deadline=work_deadline,
+            max_parsed_transactions=max_parsed_transactions,
         )
         try:
             worker.start()
@@ -183,6 +217,7 @@ class _ParserWorkerHandle:
     result_directory: TemporaryDirectory[str]
     deadline: float
     work_deadline: float
+    max_parsed_transactions: int
     closed: bool = False
 
     def parse(self) -> list[ParsedRawTransaction]:
@@ -197,7 +232,11 @@ class _ParserWorkerHandle:
                 self.worker,
                 self.work_deadline,
             )
-            return _decode_transactions(self.parse_path, self.work_deadline)
+            return _decode_transactions(
+                self.parse_path,
+                self.work_deadline,
+                max_parsed_transactions=self.max_parsed_transactions,
+            )
         finally:
             self.close()
 
@@ -230,11 +269,14 @@ def _parser_worker(
     parse_ready,
     selection_path: Path,
     parse_path: Path,
+    max_parsed_transactions: int,
+    worker_resource_limits: _WorkerResourceLimits,
 ) -> None:
     try:
         os.setsid()
         session_ready.set()
         try:
+            _apply_worker_resource_limits(worker_resource_limits)
             selected = ParserRegistry(parsers).select(document, filename)
             selection_payload = {
                 "status": "selected",
@@ -243,6 +285,12 @@ def _parser_worker(
             }
         except StatementParserError as error:
             selection_payload = {"status": "error", "code": error.code.value}
+            selected = None
+        except MemoryError:
+            selection_payload = {
+                "status": "error",
+                "code": ParserErrorCode.RESOURCE_LIMIT.value,
+            }
             selected = None
         except BaseException:  # noqa: BLE001
             selection_payload = {
@@ -268,11 +316,21 @@ def _parser_worker(
                 for transaction in transactions
             ):
                 raise StatementParserError(ParserErrorCode.MALFORMED)
+            if len(transactions) > max_parsed_transactions:
+                raise StatementParserError(ParserErrorCode.TRANSACTION_LIMIT)
             _write_transactions(parse_path, transactions)
         except StatementParserError as error:
             _write_worker_result(
                 parse_path,
                 {"status": "error", "code": error.code.value},
+            )
+        except MemoryError:
+            _write_worker_result(
+                parse_path,
+                {
+                    "status": "error",
+                    "code": ParserErrorCode.RESOURCE_LIMIT.value,
+                },
             )
         except BaseException:  # noqa: BLE001
             _write_worker_result(
@@ -351,6 +409,8 @@ def _read_selection_result(path: Path, deadline: float) -> object:
 def _decode_transactions(
     path: Path,
     deadline: float,
+    *,
+    max_parsed_transactions: int = 10_000,
 ) -> list[ParsedRawTransaction]:
     try:
         if monotonic() >= deadline:
@@ -390,6 +450,8 @@ def _decode_transactions(
                     transactions.append(ParsedRawTransaction(**transaction))
                 except (TypeError, ValueError):
                     raise StatementParserError(ParserErrorCode.MALFORMED) from None
+                if len(transactions) > max_parsed_transactions:
+                    raise StatementParserError(ParserErrorCode.TRANSACTION_LIMIT)
                 if monotonic() >= deadline:
                     raise StatementParserError(ParserErrorCode.TIME_LIMIT)
         if monotonic() >= deadline:
@@ -450,6 +512,27 @@ def _signal_process_group(process_group_id: int, signal_number: int) -> None:
         pass
 
 
+def _apply_worker_resource_limits(limits: _WorkerResourceLimits) -> None:
+    _set_soft_resource_limit(resource.RLIMIT_CPU, limits.cpu_seconds)
+    _set_soft_resource_limit(resource.RLIMIT_NOFILE, limits.max_open_files)
+    address_space_limit = getattr(resource, "RLIMIT_AS", None)
+    if sys.platform.startswith("linux") and address_space_limit is not None:
+        _set_soft_resource_limit(address_space_limit, limits.address_space_bytes)
+
+
+def _set_soft_resource_limit(resource_type: int, requested_limit: int) -> None:
+    try:
+        current_soft_limit, hard_limit = resource.getrlimit(resource_type)
+        effective_limit = requested_limit
+        if hard_limit != resource.RLIM_INFINITY:
+            effective_limit = min(effective_limit, hard_limit)
+        if current_soft_limit != resource.RLIM_INFINITY:
+            effective_limit = min(effective_limit, current_soft_limit)
+        resource.setrlimit(resource_type, (effective_limit, hard_limit))
+    except (OSError, ValueError):
+        return
+
+
 def _remaining_seconds(deadline: float) -> float:
     return max(0, deadline - monotonic())
 
@@ -462,7 +545,21 @@ def _wait_for_worker_result(result_ready, worker, deadline: float) -> None:
         if result_ready.wait(min(0.01, remaining_seconds)):
             return
         if not worker.is_alive():
-            raise StatementParserError(ParserErrorCode.MALFORMED)
+            raise _worker_exit_error(worker)
+
+
+def _worker_exit_error(worker) -> StatementParserError:
+    resource_signals = {
+        -signal_number
+        for signal_number in (
+            getattr(signal, "SIGXCPU", None),
+            getattr(signal, "SIGKILL", None),
+        )
+        if signal_number is not None
+    }
+    if worker.exitcode in resource_signals:
+        return StatementParserError(ParserErrorCode.RESOURCE_LIMIT)
+    return StatementParserError(ParserErrorCode.MALFORMED)
 
 
 def _raise_worker_error(payload: object) -> None:

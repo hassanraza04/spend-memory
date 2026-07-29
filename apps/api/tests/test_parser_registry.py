@@ -106,6 +106,11 @@ class _BrokenParser(_Parser):
         raise ValueError("SENSITIVE-STATEMENT-DETAIL")
 
 
+class _MemoryExhaustedParser(_Parser):
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        raise MemoryError
+
+
 def test_registry_maps_unexpected_parser_exceptions_to_safe_malformed_errors() -> None:
     registry = ParserRegistry([_BrokenParser("csv", 1.0)])
 
@@ -115,6 +120,17 @@ def test_registry_maps_unexpected_parser_exceptions_to_safe_malformed_errors() -
     assert caught.value.code is ParserErrorCode.MALFORMED
     assert str(caught.value) == "malformed"
     assert "SENSITIVE-STATEMENT-DETAIL" not in str(caught.value)
+    assert caught.value.__cause__ is None
+
+
+def test_registry_maps_memory_exhaustion_to_a_safe_resource_error() -> None:
+    registry = ParserRegistry([_MemoryExhaustedParser("csv", 1.0)])
+
+    with pytest.raises(StatementParserError) as caught:
+        registry.parse(b"not-a-statement", "statement.csv")
+
+    assert caught.value.code is ParserErrorCode.RESOURCE_LIMIT
+    assert str(caught.value) == "resource_limit"
     assert caught.value.__cause__ is None
 
 

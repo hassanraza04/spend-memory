@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import resource
 import subprocess
 import sys
 import time
@@ -87,6 +88,49 @@ class _BlockingParser(_Parser):
         return []
 
 
+class _ManyTransactionsParser(_Parser):
+    def __init__(self, transaction_count: int) -> None:
+        super().__init__()
+        self.transaction_count = transaction_count
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        return [_Parser.parse(self, document)[0] for _ in range(self.transaction_count)]
+
+
+class _MemoryExhaustedParser(_Parser):
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        raise MemoryError
+
+
+class _MemoryExhaustedDetector(_Parser):
+    def can_parse(self, document: bytes, filename: str) -> float:
+        raise MemoryError
+
+
+class _ResourceReportingParser(_Parser):
+    def __init__(self, report_path: Path) -> None:
+        super().__init__()
+        self.report_path = report_path
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        limit_names = {
+            "cpu": resource.RLIMIT_CPU,
+            "open_files": resource.RLIMIT_NOFILE,
+        }
+        if hasattr(resource, "RLIMIT_AS"):
+            limit_names["address_space"] = resource.RLIMIT_AS
+        self.report_path.write_text(
+            json.dumps(
+                {
+                    name: resource.getrlimit(limit_type)[0]
+                    for name, limit_type in limit_names.items()
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 1.0
+
+
 class _StatefulParser(_Parser):
     def __init__(self) -> None:
         super().__init__()
@@ -160,6 +204,10 @@ def _service(
     *,
     max_bytes: int = 1024,
     parser_timeout_seconds: float = 20.0,
+    max_parsed_transactions: int = 10_000,
+    parser_cpu_limit_seconds: int = 25,
+    parser_address_space_bytes: int = 1_500 * 1024 * 1024,
+    parser_max_open_files: int = 64,
 ) -> IngestionService:
     repository = ImportRepository(
         database_path=tmp_path / "spend-memory.duckdb",
@@ -167,6 +215,10 @@ def _service(
         limits=ImportLimits(
             max_document_bytes=max_bytes,
             parser_timeout_seconds=parser_timeout_seconds,
+            max_parsed_transactions=max_parsed_transactions,
+            parser_cpu_limit_seconds=parser_cpu_limit_seconds,
+            parser_address_space_bytes=parser_address_space_bytes,
+            parser_max_open_files=parser_max_open_files,
         ),
     )
     return IngestionService(
@@ -379,6 +431,84 @@ def test_ingress_kills_a_blocked_parser_at_the_parser_deadline(
     assert error_code == "time_limit"
     assert time.monotonic() - started_at < 5
     _assert_process_is_gone(process_id_path)
+
+
+def test_ingress_rejects_a_parser_result_above_the_transaction_limit(
+    tmp_path: Path,
+) -> None:
+    service = _service(
+        tmp_path,
+        _ManyTransactionsParser(transaction_count=3),
+        max_parsed_transactions=2,
+    )
+
+    with pytest.raises(ImportRepositoryError) as caught:
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+
+    assert caught.value.code == "transaction_limit"
+    assert str(caught.value) == "transaction_limit"
+
+
+def test_ingress_returns_a_safe_error_for_a_worker_memory_limit_breach(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path, _MemoryExhaustedParser())
+
+    with pytest.raises(ImportRepositoryError) as caught:
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+
+    assert caught.value.code == "resource_limit"
+    assert str(caught.value) == "resource_limit"
+
+
+def test_ingress_returns_a_safe_error_for_a_detector_memory_limit_breach(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path, _MemoryExhaustedDetector())
+
+    with pytest.raises(StatementParserError) as caught:
+        service.import_document(
+            document=b"valid text",
+            filename="statement.csv",
+            declared_mime_type="text/csv",
+        )
+
+    assert caught.value.code is ParserErrorCode.RESOURCE_LIMIT
+    assert str(caught.value) == "resource_limit"
+
+
+def test_isolated_parser_applies_resource_limits_before_detection(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "worker-limits.json"
+    service = _service(
+        tmp_path,
+        _ResourceReportingParser(report_path),
+        parser_cpu_limit_seconds=10,
+        parser_address_space_bytes=768 * 1024 * 1024,
+        parser_max_open_files=48,
+    )
+
+    result = service.import_document(
+        document=b"valid text",
+        filename="statement.csv",
+        declared_mime_type="text/csv",
+    )
+
+    worker_limits = json.loads(report_path.read_text(encoding="utf-8"))
+    assert result.transaction_count == 1
+    assert worker_limits["cpu"] <= 10
+    assert worker_limits["open_files"] <= 48
+    if sys.platform.startswith("linux"):
+        assert worker_limits["address_space"] <= 768 * 1024 * 1024
 
 
 def test_ingress_kills_parser_descendants_at_the_parser_deadline(

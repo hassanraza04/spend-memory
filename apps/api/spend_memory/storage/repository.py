@@ -38,6 +38,10 @@ class ImportLimits:
     max_pdf_page_height_points: float = 14_400
     pdf_preflight_timeout_seconds: float = 2.0
     parser_timeout_seconds: float = 20.0
+    max_parsed_transactions: int = 10_000
+    parser_cpu_limit_seconds: int = 25
+    parser_address_space_bytes: int = 1_500 * 1024 * 1024
+    parser_max_open_files: int = 64
 
 
 DEFAULT_IMPORT_LIMITS = ImportLimits()
