@@ -776,6 +776,8 @@ class ImportRepository:
         timeout_seconds = self.limits.pdf_preflight_timeout_seconds
         if timeout_seconds <= 0:
             raise ImportRepositoryError("pdf_preflight_timeout")
+        deadline = time.monotonic() + timeout_seconds
+        work_deadline = _pdf_preflight_work_deadline(deadline, timeout_seconds)
 
         process_context = multiprocessing.get_context("spawn")
         receive_result, send_result = process_context.Pipe(duplex=False)
@@ -786,13 +788,9 @@ class ImportRepository:
         try:
             worker.start()
             send_result.close()
-            worker.join(timeout=timeout_seconds)
+            _join_preflight_worker_until_deadline(worker, work_deadline)
             if worker.is_alive():
-                worker.terminate()
-                worker.join(timeout=1)
-                if worker.is_alive():
-                    worker.kill()
-                    worker.join()
+                _stop_preflight_worker_until_deadline(worker, deadline)
                 raise ImportRepositoryError("pdf_preflight_timeout")
             if worker.exitcode != 0 or not receive_result.poll():
                 raise ImportRepositoryError(_pdf_preflight_exit_error(worker))
@@ -801,9 +799,9 @@ class ImportRepository:
             send_result.close()
             receive_result.close()
             if worker.is_alive():
-                worker.terminate()
-                worker.join()
-            worker.close()
+                _stop_preflight_worker_until_deadline(worker, deadline)
+            if not worker.is_alive():
+                worker.close()
 
         if error_code is not None:
             raise ImportRepositoryError(error_code)
@@ -900,3 +898,28 @@ def _pdf_preflight_exit_error(worker) -> str:
     if worker.exitcode in resource_signals:
         return "resource_limit"
     return "invalid_pdf"
+
+
+def _join_preflight_worker_until_deadline(worker, deadline: float) -> None:
+    worker.join(timeout=max(0, deadline - time.monotonic()))
+
+
+def _stop_preflight_worker_until_deadline(worker, deadline: float) -> None:
+    if worker.is_alive():
+        worker.terminate()
+    if worker.is_alive():
+        remaining_seconds = max(0, deadline - time.monotonic())
+        terminate_deadline = min(
+            deadline,
+            time.monotonic() + min(0.1, remaining_seconds / 2),
+        )
+        _join_preflight_worker_until_deadline(worker, terminate_deadline)
+    if worker.is_alive():
+        worker.kill()
+    if worker.is_alive():
+        _join_preflight_worker_until_deadline(worker, deadline)
+
+
+def _pdf_preflight_work_deadline(deadline: float, timeout_seconds: float) -> float:
+    cleanup_reserve_seconds = min(0.25, max(0, timeout_seconds * 0.2))
+    return deadline - cleanup_reserve_seconds

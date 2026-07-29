@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib
 import multiprocessing
+import os
 import resource
+import signal
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
@@ -212,6 +215,30 @@ def _report_effective_resource_limits(limits, result_queue) -> None:
             for name, resource_type in resource_types.items()
         }
     )
+
+
+def _blocking_pdf_preflight_worker(
+    document: bytes,
+    limits,
+    result_connection,
+    process_id_path: str,
+) -> None:
+    del document, limits, result_connection
+    Path(process_id_path).write_text(str(os.getpid()), encoding="utf-8")
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    multiprocessing.Event().wait()
+
+
+def _assert_process_is_gone(process_id_path: Path) -> None:
+    process_id = int(process_id_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            os.kill(process_id, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.01)
+    pytest.fail(f"process {process_id} is still alive")
 
 
 def test_repository_does_not_expose_an_unisolated_import_api(tmp_path: Path) -> None:
@@ -1310,6 +1337,45 @@ def test_pdf_preflight_maps_memory_exhaustion_to_a_safe_resource_error(
 
     assert receive_result.recv() == "resource_limit"
     receive_result.close()
+
+
+def test_pdf_preflight_timeout_does_not_wait_for_an_unresponsive_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository_module()
+    worker_id_path = tmp_path / "pdf-preflight.pid"
+    process_context = multiprocessing.get_context("spawn")
+
+    class _BlockingPreflightContext:
+        def Pipe(self, *args, **kwargs):
+            return process_context.Pipe(*args, **kwargs)
+
+        def Process(self, *, target, args):
+            del target
+            return process_context.Process(
+                target=_blocking_pdf_preflight_worker,
+                args=(*args, str(worker_id_path)),
+            )
+
+    monkeypatch.setattr(
+        repository.multiprocessing,
+        "get_context",
+        lambda name: _BlockingPreflightContext(),
+    )
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "data",
+        limits=repository.ImportLimits(pdf_preflight_timeout_seconds=1),
+    )
+
+    started_at = time.monotonic()
+    with pytest.raises(repository.ImportRepositoryError) as caught:
+        store._validate_pdf(_pdf_with_pages(1))
+
+    assert caught.value.code == "pdf_preflight_timeout"
+    assert time.monotonic() - started_at < 1.5
+    _assert_process_is_gone(worker_id_path)
 
 
 @pytest.mark.parametrize(
