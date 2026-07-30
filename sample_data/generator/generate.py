@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+import fitz
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.units import mm
 from reportlab.pdfgen.canvas import Canvas
@@ -168,10 +169,33 @@ def _write_aed_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
     canvas.save()
 
 
+def _write_aed_image_only_pdf(path: Path) -> None:
+    source = fitz.open()
+    source_page = source.new_page(width=A4[0], height=A4[1])
+    for y, text, font_size in (
+        (70, "SYNTHETIC AED STATEMENT | TABULAR LAYOUT", 16),
+        (115, "Date", 12),
+        (145, "Description", 12),
+        (175, "Amount (fils)", 12),
+        (230, "2026-01-15", 12),
+        (260, "OCR TEST MARKET", 12),
+        (290, "-1200", 12),
+    ):
+        source_page.insert_text((50, y), text, fontsize=font_size, fontname="helv")
+    rendered_page = source_page.get_pixmap(dpi=200, colorspace=fitz.csGRAY, alpha=False)
+    source.close()
+
+    image_only = fitz.open()
+    output_page = image_only.new_page(width=A4[0], height=A4[1])
+    output_page.insert_image(output_page.rect, stream=rendered_page.tobytes("png"))
+    image_only.save(path, garbage=4, deflate=True, no_new_id=True)
+    image_only.close()
+
+
 def _write_pkr_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
     canvas = Canvas(str(path), pagesize=letter, invariant=1)
     width, height = letter
-    y = height - 42
+    y = height - 60
     canvas.setFillColorRGB(0, 0.18, 0.34)
     canvas.rect(0, height - 58, width, 58, fill=1, stroke=0)
     canvas.setFillColorRGB(1, 1, 1)
@@ -182,7 +206,7 @@ def _write_pkr_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
         y -= 18
         if y < 36:
             canvas.showPage()
-            y = height - 42
+            y = height - 78
             canvas.setFillColorRGB(0, 0.18, 0.34)
             canvas.rect(0, height - 58, width, 58, fill=1, stroke=0)
             canvas.setFillColorRGB(1, 1, 1)
@@ -232,6 +256,7 @@ def generate_dataset(output_directory: Path, *, seed: int = DEFAULT_SEED) -> Gen
     csv_path = source_directory / "aed_january_2026.csv"
     _write_csv(csv_path, csv_transactions)
     _write_aed_pdf(source_directory / "aed_statement_tabular.pdf", aed_transactions)
+    _write_aed_image_only_pdf(source_directory / "aed_statement_image_only.pdf")
     _write_pkr_pdf(source_directory / "pkr_statement_compact.pdf", pkr_transactions)
     (expected_directory / "canonical_ledger.json").write_text(
         json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8"
