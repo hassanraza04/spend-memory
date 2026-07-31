@@ -203,9 +203,6 @@ class _IsolatedStatementParser:
     document_sha256: str = field(repr=False, compare=False)
     handle: _ParserWorkerHandle = field(repr=False, compare=False)
 
-    def can_parse(self, document: bytes, filename: str) -> float:
-        return 1.0
-
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         if sha256(document).hexdigest() != self.document_sha256:
             self.close()

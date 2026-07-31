@@ -187,9 +187,71 @@ def _run_distinct_document_process_import(
 
 def _repository_module():
     try:
-        return importlib.import_module("spend_memory.storage.repository")
+        module = importlib.import_module("spend_memory.storage.repository")
     except ModuleNotFoundError:
         pytest.fail("storage repository is not implemented")
+
+    class TestImportRepository(module.ImportRepository):
+        def _import_document_for_tests(
+            self,
+            *,
+            document: bytes,
+            filename: str,
+            declared_mime_type: str,
+            parser,
+        ):
+            self.validate_document(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+            )
+            existing = self.find_existing_import(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser_id=parser.parser_id,
+                parser_version=parser.version,
+            )
+            if existing is not None:
+                return existing
+            try:
+                transactions = parser.parse(document)
+            except Exception:  # noqa: BLE001
+                self.record_isolated_parse_error(
+                    document=document,
+                    filename=filename,
+                    declared_mime_type=declared_mime_type,
+                    parser_id=parser.parser_id,
+                    parser_version=parser.version,
+                    code="parser_failed",
+                )
+                raise module.ImportRepositoryError("parser_failed") from None
+            return self.store_preparsed_document(
+                document=document,
+                filename=filename,
+                declared_mime_type=declared_mime_type,
+                parser_id=parser.parser_id,
+                parser_version=parser.version,
+                transactions=transactions,
+            )
+
+    class TestRepositoryModule:
+        ImportRepository = TestImportRepository
+
+        def __getattr__(self, name: str):
+            return getattr(module, name)
+
+    return TestRepositoryModule()
+
+
+def test_repository_exposes_no_direct_parser_import_path(tmp_path) -> None:
+    repository = importlib.import_module("spend_memory.storage.repository")
+    store = repository.ImportRepository(
+        database_path=tmp_path / "spend-memory.duckdb",
+        data_directory=tmp_path / "documents",
+    )
+
+    assert not hasattr(store, "_import_document_for_tests")
 
 
 def _pdf_with_pages(page_count: int) -> bytes:
@@ -464,7 +526,7 @@ def test_new_parser_version_repairs_corrupt_original_file(
     assert final_path.read_bytes() == CSV_DOCUMENT
 
 
-def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
+def test_concurrent_preparsed_imports_share_one_import_run(tmp_path: Path) -> None:
     repository = _repository_module()
     store = repository.ImportRepository(
         database_path=tmp_path / "spend-memory.duckdb",
@@ -499,14 +561,14 @@ def test_concurrent_exact_retries_share_one_import_run(tmp_path: Path) -> None:
             """
         ).fetchone()
 
-    assert parser.parse_calls == 1
+    assert parser.parse_calls == 2
     assert results[0].document_id == results[1].document_id
     assert results[0].run_id == results[1].run_id
     assert sorted(result.was_already_imported for result in results) == [False, True]
     assert counts == (1, 1, 1, 0)
 
 
-def test_independent_process_exact_retries_share_one_import_run(
+def test_independent_preparsed_imports_share_one_import_run(
     tmp_path: Path,
 ) -> None:
     repository = _repository_module()
@@ -554,7 +616,7 @@ def test_independent_process_exact_retries_share_one_import_run(
                 worker.terminate()
             worker.join(timeout=10)
 
-    assert parse_count.value == 1
+    assert parse_count.value == 2
     assert [result[0] for result in results] == ["ok", "ok"]
     assert results[0][1:3] == results[1][1:3]
     assert sorted(result[3] for result in results) == [False, True]
