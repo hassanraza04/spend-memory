@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from hashlib import sha256
 from pathlib import Path
 
@@ -9,6 +10,21 @@ import fitz
 from sample_data.generator.generate import DEFAULT_SEED, generate_dataset
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_reportlab_is_a_development_only_dependency() -> None:
+    configuration = tomllib.loads(
+        (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert not any(
+        dependency.startswith("reportlab")
+        for dependency in configuration["project"]["dependencies"]
+    )
+    assert any(
+        dependency.startswith("reportlab")
+        for dependency in configuration["dependency-groups"]["dev"]
+    )
 
 
 def test_fixed_seed_regeneration_matches_committed_dataset_artifacts(tmp_path) -> None:

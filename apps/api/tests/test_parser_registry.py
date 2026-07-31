@@ -79,6 +79,20 @@ def test_isolated_parser_rejects_bytes_other_than_the_selected_document() -> Non
     assert caught.value.code is ParserErrorCode.MALFORMED
 
 
+def test_isolated_parser_exposes_no_detector_method() -> None:
+    registry = ParserRegistry([_Parser("csv", 1.0)])
+    parser = registry.select_isolated(
+        b"statement",
+        "statement.csv",
+        timeout_seconds=2.0,
+    )
+
+    try:
+        assert not hasattr(parser, "can_parse")
+    finally:
+        parser.close()
+
+
 class _EncryptedParser(_Parser):
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         raise StatementParserError(ParserErrorCode.ENCRYPTED)
