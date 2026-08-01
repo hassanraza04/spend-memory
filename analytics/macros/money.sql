@@ -2,16 +2,22 @@
 trim(regexp_replace({{ column_name }}, '^(AED|PKR)\s*', ''))
 {% endmacro %}
 
-{% macro amount_is_integer(column_name) %}
+{% macro parsed_amount(column_name) %}
+try_cast({{ normalized_amount_text(column_name) }} as bigint)
+{% endmacro %}
+
+{% macro amount_is_integer(column_name, parsed_column_name) %}
 regexp_full_match({{ normalized_amount_text(column_name) }}, '[+-]?[0-9]+')
+and {{ parsed_column_name }} is not null
+and {{ parsed_column_name }} <> try_cast('-9223372036854775808' as bigint)
 {% endmacro %}
 
-{% macro amount_minor(column_name) %}
-abs(cast({{ normalized_amount_text(column_name) }} as bigint))
+{% macro amount_minor(parsed_column_name) %}
+abs({{ parsed_column_name }})
 {% endmacro %}
 
-{% macro direction(column_name) %}
-case when cast({{ normalized_amount_text(column_name) }} as bigint) < 0 then 'debit' else 'credit' end
+{% macro direction(parsed_column_name) %}
+case when {{ parsed_column_name }} < 0 then 'debit' else 'credit' end
 {% endmacro %}
 
 {% macro generate_schema_name(custom_schema_name, node) -%}

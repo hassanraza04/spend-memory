@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import duckdb
+import pytest
 from spend_memory.ingestion.parsers.canonical_csv import CanonicalCsvParser
 from spend_memory.ingestion.parsers.synthetic_pdf_a import SyntheticAedTabularPdfParser
 from spend_memory.ingestion.parsers.synthetic_pdf_b import SyntheticPkrCompactPdfParser
@@ -78,6 +79,70 @@ def test_dbt_builds_staging_models_from_active_imports(tmp_path: Path) -> None:
     assert currencies == [("AED",), ("PKR",)]
 
 
+@pytest.mark.parametrize(
+    "amount_text",
+    ["9223372036854775808", "-9223372036854775808"],
+    ids=["oversized-positive", "minimum-negative"],
+)
+def test_dbt_quarantines_amounts_that_cannot_be_canonical_money(
+    tmp_path: Path, amount_text: str
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    with duckdb.connect(str(database_path)) as connection:
+        raw_transaction_id = connection.execute(
+            """
+            update raw_transactions
+            set amount_text = ?
+            where raw_transaction_id = (
+              select raw_transaction_id from raw_transactions order by raw_transaction_id limit 1
+            )
+            returning raw_transaction_id
+            """,
+            [amount_text],
+        ).fetchone()[0]
+
+    _dbt_build(database_path, "stg_transaction_rejections")
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        rejection = connection.execute(
+            """
+            select amount_text, rejection_reason
+            from analytics.stg_transaction_rejections
+            where raw_transaction_id = ?
+            """,
+            [raw_transaction_id],
+        ).fetchone()
+    assert rejection == (amount_text, "invalid_amount")
+
+
+def test_dbt_rejects_missing_currency_as_unsupported(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    with duckdb.connect(str(database_path)) as connection:
+        raw_transaction_id = connection.execute(
+            """
+            update raw_transactions
+            set currency_text = null
+            where raw_transaction_id = (
+              select raw_transaction_id from raw_transactions order by raw_transaction_id limit 1
+            )
+            returning raw_transaction_id
+            """
+        ).fetchone()[0]
+
+    _dbt_build(database_path, "stg_transaction_rejections")
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        rejection_reason = connection.execute(
+            """
+            select rejection_reason
+            from analytics.stg_transaction_rejections
+            where raw_transaction_id = ?
+            """,
+            [raw_transaction_id],
+        ).fetchone()[0]
+    assert rejection_reason == "unsupported_currency"
+
+
 def test_dbt_marks_matching_synthetic_imports_reconciled(tmp_path: Path) -> None:
     database_path = _build_fixture_database(tmp_path)
     _dbt_build(database_path, "int_import_reconciliation")
@@ -86,6 +151,116 @@ def test_dbt_marks_matching_synthetic_imports_reconciled(tmp_path: Path) -> None
             "select reconciliation_status, count(*) from analytics.int_import_reconciliation group by 1 order by 1"
         ).fetchall()
     assert statuses == [("reconciled", 3)]
+
+
+def test_balance_evidence_never_mixes_currencies_for_one_account(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    with duckdb.connect(str(database_path)) as connection:
+        import_run_id = connection.execute(
+            """
+            select run.run_id
+            from import_runs as run
+            join source_documents as document on run.document_id = document.document_id
+            where document.original_filename = 'aed_january_2026.csv'
+            """
+        ).fetchone()[0]
+        connection.execute(
+            """
+            update raw_transactions
+            set
+              date_text = case source_ordinal
+                when 1 then '1900-01-01'
+                when 2 then '1900-01-02'
+                when 3 then '1900-01-03'
+                when 4 then '1900-01-04'
+              end,
+              amount_text = case when source_ordinal in (1, 3) then '-100' else '-200' end,
+              currency_text = case when source_ordinal in (1, 3) then 'AED' else 'PKR' end,
+              raw_balance_text = case source_ordinal
+                when 1 then '1000'
+                when 2 then '5000'
+                when 3 then '900'
+                when 4 then '4800'
+              end
+            where import_run_id = ? and source_ordinal between 1 and 4
+            """,
+            [import_run_id],
+        )
+
+    _dbt_build(database_path, "int_import_reconciliation")
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        checks = connection.execute(
+            """
+            select currency, balance_check_status
+            from analytics.int_running_balance_checks
+            where import_run_id = ? and source_ordinal between 1 and 4
+            order by source_ordinal
+            """,
+            [import_run_id],
+        ).fetchall()
+        failed_evidence = connection.execute(
+            """
+            select currency, has_failed_balance_check
+            from analytics.int_import_reconciliation
+            where import_run_id = ?
+            order by currency
+            """,
+            [import_run_id],
+        ).fetchall()
+    assert checks == [
+        ("AED", "not_available"),
+        ("PKR", "not_available"),
+        ("AED", "pass"),
+        ("PKR", "pass"),
+    ]
+    assert failed_evidence == [("AED", False), ("PKR", False)]
+
+
+def test_dbt_keeps_unavailable_evidence_for_an_empty_active_import(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    with duckdb.connect(str(database_path)) as connection:
+        document_id = connection.execute(
+            """
+            insert into source_documents (
+              document_id, sha256_hex, original_filename, mime_type, byte_size, storage_filename
+            )
+            values (uuid(), repeat('0', 64), 'empty.csv', 'text/csv', 0, 'empty.csv')
+            returning document_id
+            """
+        ).fetchone()[0]
+        import_run_id = connection.execute(
+            """
+            insert into import_runs (run_id, document_id, parser_id, parser_version, is_active)
+            values (uuid(), ?, 'canonical-csv', 'empty-fixture', true)
+            returning run_id
+            """,
+            [document_id],
+        ).fetchone()[0]
+
+    _dbt_build(database_path, "int_import_reconciliation")
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        evidence = connection.execute(
+            """
+            select
+              original_filename,
+              account_identity,
+              currency,
+              net_amount_minor,
+              expected_net_amount_minor,
+              has_failed_balance_check,
+              reconciliation_status
+            from analytics.int_import_reconciliation
+            where import_run_id = ?
+            """,
+            [import_run_id],
+        ).fetchone()
+    assert evidence == ("empty.csv", None, None, 0, None, False, "not_available")
 
 
 def test_duplicate_candidates_keep_every_transaction(tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ with parsed_balances as (
     lag(current_balance_minor) over balance_window as previous_balance_minor
   from parsed_balances
   window balance_window as (
-    partition by import_run_id, account_identity
+    partition by import_run_id, account_identity, currency
     order by transaction_date, source_ordinal
   )
 )
@@ -16,6 +16,7 @@ select
   raw_transaction_id,
   import_run_id,
   account_identity,
+  currency,
   transaction_date,
   source_ordinal,
   net_amount_minor,

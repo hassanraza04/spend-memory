@@ -8,11 +8,9 @@ models:
           - not_null
           - relationships:
               arguments:
-                to: "{{ ref('stg_transactions') }}"
-                field: import_run_id
+                to: "{{ source('spend_memory', 'import_runs') }}"
+                field: run_id
       - name: account_identity
-        tests:
-          - not_null
       - name: currency
         tests:
           - accepted_values:

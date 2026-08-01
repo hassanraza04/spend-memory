@@ -33,6 +33,8 @@ Build local analytics models against a local DuckDB file:
 SPEND_MEMORY_DUCKDB_PATH=/absolute/path/to/local.duckdb make analytics
 ```
 
+The checked-in analytics profile disables anonymous dbt usage telemetry. This is a local-only privacy choice.
+
 Import storage uses `fcntl` advisory file locks. A database-level lock beside
 the DuckDB file coordinates every local writer, including imports of different
 statement documents. Per-document locks in the configured data directory also
