@@ -96,3 +96,31 @@ def test_duplicate_candidates_keep_every_transaction(tmp_path: Path) -> None:
         candidates = connection.execute("select count(*) from analytics.int_duplicate_candidates").fetchone()[0]
     assert staged == 864
     assert candidates >= 2
+
+
+def test_trusted_marts_match_the_canonical_ledger(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions mart_monthly_summary mart_period_comparisons")
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        transaction_count = connection.execute("select count(*) from analytics.mart_transactions").fetchone()[0]
+        total = connection.execute("select sum(net_amount_minor) from analytics.mart_transactions").fetchone()[0]
+        currencies = connection.execute(
+            "select distinct currency from analytics.mart_monthly_summary order by 1"
+        ).fetchall()
+    assert transaction_count == 864
+    assert total == -114355263
+    assert currencies == [("AED",), ("PKR",)]
+
+
+def test_unreconciled_import_is_excluded_from_trusted_marts(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("update raw_transactions set amount_text = '-999999999' where source_ordinal = 1")
+    _dbt_build(database_path, "mart_transactions")
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        statuses = connection.execute(
+            "select distinct reconciliation_status from analytics.int_import_reconciliation"
+        ).fetchall()
+        count = connection.execute("select count(*) from analytics.mart_transactions").fetchone()[0]
+    assert ("unreconciled",) in statuses
+    assert count < 864
