@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: spend_memory
+    schema: main
+    tables:
+      - name: source_documents
+        loaded_at_field: created_at
+        freshness:
+          warn_after: {count: 30, period: day}
+          error_after: {count: 90, period: day}
+      - name: import_runs
+      - name: raw_transactions

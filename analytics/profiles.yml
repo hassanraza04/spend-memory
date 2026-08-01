@@ -1,0 +1,8 @@
+spend_memory_analytics:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('SPEND_MEMORY_DUCKDB_PATH') }}"
+      schema: analytics
+      threads: 1

@@ -1,0 +1,12 @@
+name: spend_memory_analytics
+version: "1.0"
+config-version: 2
+profile: spend_memory_analytics
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+models:
+  spend_memory_analytics:
+    +schema: analytics
+    +materialized: table

@@ -8,3 +8,6 @@ coverage/
 apps/api/data/
 .superpowers/
 .worktrees/
+analytics/.user.yml
+analytics/logs/
+analytics/target/
