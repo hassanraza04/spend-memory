@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    columns:
+      - name: raw_transaction_id
+        tests:
+          - unique
+          - relationships:
+              arguments:
+                to: "{{ source('spend_memory', 'raw_transactions') }}"
+                field: raw_transaction_id
+      - name: description
+        tests:
+          - not_null:
+              config:
+                where: "is_valid"
+      - name: currency
+        tests:
+          - accepted_values:
+              arguments:
+                values: [AED, PKR]
+              config:
+                where: "is_valid"
+      - name: direction
+        tests:
+          - accepted_values:
+              arguments:
+                values: [debit, credit]
+              config:
+                where: "is_valid"
+      - name: parser_id
+        tests:
+          - accepted_values:
+              arguments:
+                values: [canonical-csv, synthetic-aed-tabular-pdf, synthetic-pkr-compact-pdf]

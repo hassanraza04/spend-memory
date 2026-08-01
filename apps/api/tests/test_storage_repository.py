@@ -279,6 +279,20 @@ def _report_effective_resource_limits(limits, result_queue) -> None:
     )
 
 
+def _memory_exhausted_pdf_preflight_worker(
+    document: bytes,
+    limits,
+    result_connection,
+) -> None:
+    repository = _repository_module()
+
+    def raise_memory_error(*args, **kwargs):
+        raise MemoryError
+
+    repository.fitz.open = raise_memory_error
+    repository._pdf_preflight_worker(document, limits, result_connection)
+
+
 def _blocking_pdf_preflight_worker(
     document: bytes,
     limits,
@@ -1380,25 +1394,30 @@ def test_pdf_preflight_uses_the_parser_worker_resource_budget() -> None:
     assert resource_limits.max_open_files == 12
 
 
-def test_pdf_preflight_maps_memory_exhaustion_to_a_safe_resource_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_pdf_preflight_maps_memory_exhaustion_to_a_safe_resource_error() -> None:
     repository = _repository_module()
-    receive_result, send_result = multiprocessing.Pipe(duplex=False)
+    process_context = multiprocessing.get_context("spawn")
+    receive_result, send_result = process_context.Pipe(duplex=False)
     document = _pdf_with_pages(1)
-
-    def raise_memory_error(*args, **kwargs):
-        raise MemoryError
-
-    monkeypatch.setattr(repository.fitz, "open", raise_memory_error)
-    repository._pdf_preflight_worker(
-        document,
-        repository.DEFAULT_IMPORT_LIMITS,
-        send_result,
+    original_cpu_limit = resource.getrlimit(resource.RLIMIT_CPU)
+    worker = process_context.Process(
+        target=_memory_exhausted_pdf_preflight_worker,
+        args=(document, repository.DEFAULT_IMPORT_LIMITS, send_result),
     )
 
-    assert receive_result.recv() == "resource_limit"
-    receive_result.close()
+    worker.start()
+    send_result.close()
+    worker.join(timeout=5)
+    try:
+        assert worker.exitcode == 0
+        assert receive_result.recv() == "resource_limit"
+        assert resource.getrlimit(resource.RLIMIT_CPU) == original_cpu_limit
+    finally:
+        receive_result.close()
+        if worker.is_alive():
+            worker.kill()
+            worker.join(timeout=0.1)
+        worker.close()
 
 
 def test_pdf_preflight_timeout_does_not_wait_for_an_unresponsive_worker(

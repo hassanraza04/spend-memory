@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: int_import_reconciliation
+    columns:
+      - name: import_run_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: "{{ source('spend_memory', 'import_runs') }}"
+                field: run_id
+      - name: account_identity
+      - name: currency
+        tests:
+          - accepted_values:
+              arguments:
+                values: [AED, PKR]
+      - name: net_amount_minor
+        tests:
+          - not_null
+      - name: has_failed_balance_check
+        tests:
+          - not_null
+      - name: reconciliation_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [reconciled, unreconciled, not_available]

@@ -27,6 +27,14 @@ make lint
 
 Use `make dev` to build and start the stack. The web app is bound to `127.0.0.1:3000` and the API health endpoint is at `http://127.0.0.1:8000/health`. DuckDB data is retained in the local `duckdb_data` Docker volume. Use `make clean-demo` to stop the stack and remove that demo volume.
 
+Build local analytics models against a local DuckDB file:
+
+```sh
+SPEND_MEMORY_DUCKDB_PATH=/absolute/path/to/local.duckdb make analytics
+```
+
+The checked-in analytics profile disables anonymous dbt usage telemetry. This is a local-only privacy choice.
+
 Import storage uses `fcntl` advisory file locks. A database-level lock beside
 the DuckDB file coordinates every local writer, including imports of different
 statement documents. Per-document locks in the configured data directory also
