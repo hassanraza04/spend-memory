@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import random
+import shutil
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -26,6 +27,12 @@ CSV_COLUMNS = (
     "amount_minor",
     "description",
     "transaction_type",
+)
+IMPORT_CONTROL_COLUMNS = (
+    "original_filename",
+    "account_identity",
+    "currency",
+    "expected_net_amount_minor",
 )
 
 
@@ -142,6 +149,21 @@ def _write_csv(path: Path, transactions: list[dict[str, Any]]) -> None:
             writer.writerow({column: transaction[column] for column in CSV_COLUMNS})
 
 
+def _write_import_controls(path: Path, totals: dict[tuple[str, str, str], int]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=IMPORT_CONTROL_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        for (original_filename, account_identity, currency), expected_net_amount_minor in sorted(totals.items()):
+            writer.writerow(
+                {
+                    "original_filename": original_filename,
+                    "account_identity": account_identity,
+                    "currency": currency,
+                    "expected_net_amount_minor": expected_net_amount_minor,
+                }
+            )
+
+
 def _write_aed_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
     canvas = Canvas(str(path), pagesize=A4, invariant=1)
     _, height = A4
@@ -221,12 +243,21 @@ def _write_pkr_pdf(path: Path, transactions: list[dict[str, Any]]) -> None:
     canvas.save()
 
 
-def _reconcile(transactions: list[dict[str, Any]]) -> dict[str, Any]:
+def _reconcile(
+    transactions: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[tuple[str, str, str], int]]:
     totals: dict[str, int] = {}
+    source_totals: dict[tuple[str, str, str], int] = {}
     for transaction in transactions:
         key = f"{transaction['account_id']}:{transaction['currency']}"
         totals[key] = totals.get(key, 0) + transaction["amount_minor"]
-    return {"is_reconciled": True, "by_account_currency": totals}
+        source_key = (
+            Path(transaction["source_document"]).name,
+            transaction["account_id"],
+            transaction["currency"],
+        )
+        source_totals[source_key] = source_totals.get(source_key, 0) + transaction["amount_minor"]
+    return {"is_reconciled": True, "by_account_currency": totals}, source_totals
 
 
 def generate_dataset(output_directory: Path, *, seed: int = DEFAULT_SEED) -> GeneratedDataset:
@@ -238,7 +269,7 @@ def generate_dataset(output_directory: Path, *, seed: int = DEFAULT_SEED) -> Gen
     transactions = _make_transactions(seed)
     for transaction in transactions:
         transaction["source_document"] = _source_for(transaction)
-    reconciliation = _reconcile(transactions)
+    reconciliation, import_controls = _reconcile(transactions)
     ledger = {
         "metadata": {
             "seed": seed,
@@ -264,8 +295,14 @@ def generate_dataset(output_directory: Path, *, seed: int = DEFAULT_SEED) -> Gen
     (expected_directory / "reconciliation.json").write_text(
         json.dumps(reconciliation, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    _write_import_controls(expected_directory / "import_controls.csv", import_controls)
     return GeneratedDataset(ledger=ledger, reconciliation=reconciliation, csv_path=csv_path)
 
 
 if __name__ == "__main__":
-    generate_dataset(Path(__file__).resolve().parents[1])
+    sample_data_directory = Path(__file__).resolve().parents[1]
+    generate_dataset(sample_data_directory)
+    shutil.copyfile(
+        sample_data_directory / "expected/import_controls.csv",
+        sample_data_directory.parent / "analytics/seeds/import_controls.csv",
+    )

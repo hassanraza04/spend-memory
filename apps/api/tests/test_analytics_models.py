@@ -49,9 +49,20 @@ def _build_fixture_database(tmp_path: Path) -> Path:
 
 def _dbt_build(database_path: Path, select: str | None = None) -> None:
     environment = {**os.environ, "SPEND_MEMORY_DUCKDB_PATH": str(database_path)}
-    command = ["uv", "run", "dbt", "build", "--project-dir", "analytics", "--profiles-dir", "analytics"]
+    command = [
+        "uv",
+        "run",
+        "dbt",
+        "build",
+        "--project-dir",
+        "analytics",
+        "--profiles-dir",
+        "analytics",
+        "--indirect-selection",
+        "cautious",
+    ]
     if select:
-        command.extend(["--select", select])
+        command.extend(["--select", *(f"+{model}" for model in select.split())])
     subprocess.run(command, check=True, env=environment, text=True)
 
 
@@ -65,3 +76,23 @@ def test_dbt_builds_staging_models_from_active_imports(tmp_path: Path) -> None:
     assert accepted == 864
     assert rejected == 0
     assert currencies == [("AED",), ("PKR",)]
+
+
+def test_dbt_marks_matching_synthetic_imports_reconciled(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "int_import_reconciliation")
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        statuses = connection.execute(
+            "select reconciliation_status, count(*) from analytics.int_import_reconciliation group by 1 order by 1"
+        ).fetchall()
+    assert statuses == [("reconciled", 3)]
+
+
+def test_duplicate_candidates_keep_every_transaction(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "int_duplicate_candidates")
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        staged = connection.execute("select count(*) from analytics.stg_transactions").fetchone()[0]
+        candidates = connection.execute("select count(*) from analytics.int_duplicate_candidates").fetchone()[0]
+    assert staged == 864
+    assert candidates >= 2

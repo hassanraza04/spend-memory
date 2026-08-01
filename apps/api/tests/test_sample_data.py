@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import tomllib
 from hashlib import sha256
@@ -102,6 +103,33 @@ def test_fixed_seed_generates_the_same_canonical_ledger_and_sources(tmp_path) ->
         assert sha256((first.csv_path.parent / filename).read_bytes()).hexdigest() == sha256(
             (second.csv_path.parent / filename).read_bytes()
         ).hexdigest()
+
+
+def test_import_controls_are_deterministic_and_match_ledger(tmp_path) -> None:
+    first = generate_dataset(tmp_path / "first", seed=DEFAULT_SEED)
+    generate_dataset(tmp_path / "second", seed=DEFAULT_SEED)
+    first_controls = (tmp_path / "first/expected/import_controls.csv").read_bytes()
+    second_controls = (tmp_path / "second/expected/import_controls.csv").read_bytes()
+
+    assert first_controls == second_controls
+
+    controls = list(csv.DictReader(first_controls.decode("utf-8").splitlines()))
+    control_totals = {
+        (row["original_filename"], row["account_identity"], row["currency"]): int(
+            row["expected_net_amount_minor"]
+        )
+        for row in controls
+    }
+    ledger_totals: dict[tuple[str, str, str], int] = {}
+    for transaction in first.ledger["transactions"]:
+        key = (
+            Path(transaction["source_document"]).name,
+            transaction["account_id"],
+            transaction["currency"],
+        )
+        ledger_totals[key] = ledger_totals.get(key, 0) + transaction["amount_minor"]
+
+    assert control_totals == ledger_totals
 
 
 def test_reconciliation_matches_each_currency_account_and_exposes_required_edges(tmp_path) -> None:

@@ -1,0 +1,4 @@
+original_filename,account_identity,currency,expected_net_amount_minor
+aed_january_2026.csv,AED-SYNTH-001,AED,-171478
+aed_statement_tabular.pdf,AED-SYNTH-001,AED,-4656362
+pkr_statement_compact.pdf,PKR-SYNTH-001,PKR,-109527423
