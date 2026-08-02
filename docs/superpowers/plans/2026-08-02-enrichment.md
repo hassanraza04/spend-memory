@@ -176,7 +176,6 @@ class MerchantEvaluation:
 def test_enrichment_migration_is_idempotent_and_keeps_annotations_local(tmp_path: Path) -> None:
     database_path = tmp_path / "spend-memory.duckdb"
     repository = EnrichmentRepository(database_path)
-    repository.apply_migrations()
 
     with duckdb.connect(str(database_path), read_only=True) as connection:
         tables = {row[0] for row in connection.execute("show tables").fetchall()}
@@ -649,9 +648,9 @@ git push
 ```python
 def test_monthly_candidate_explains_dates_amount_range_and_next_window() -> None:
     result = detect_recurring_candidates([
-        _transaction("2026-01-02", -2999, "STREAMBOX MONTHLY"),
-        _transaction("2026-02-03", -2999, "STREAMBOX MONTHLY"),
-        _transaction("2026-03-02", -3099, "STREAMBOX MONTHLY"),
+        _transaction("2026-01-02", 2999, "STREAMBOX MONTHLY", direction="debit"),
+        _transaction("2026-02-03", 2999, "STREAMBOX MONTHLY", direction="debit"),
+        _transaction("2026-03-02", 3099, "STREAMBOX MONTHLY", direction="debit"),
     ], matches_by_transaction_id={})
 
     assert result[0].cadence == "monthly"
@@ -721,8 +720,8 @@ git push
 ```python
 def test_same_day_same_debit_is_a_duplicate_review_candidate() -> None:
     candidates = find_duplicate_candidates([
-        _transaction("2026-03-12", -12500, "METRO MART", raw_id=UUID(int=1)),
-        _transaction("2026-03-12", -12500, "MetroMart POS", raw_id=UUID(int=2)),
+        _transaction("2026-03-12", 12500, "METRO MART", direction="debit", raw_id=UUID(int=1)),
+        _transaction("2026-03-12", 12500, "MetroMart POS", direction="debit", raw_id=UUID(int=2)),
     ], matches_by_transaction_id={})
     assert candidates[0].raw_transaction_ids == (UUID(int=1), UUID(int=2))
     assert candidates[0].confidence == 1.0
@@ -856,8 +855,8 @@ git push
 ```python
 def test_period_explanation_contributions_and_remainder_sum_exactly() -> None:
     explanation = explain_period_change(
-        before=_period_rows("2026-01", metro=-1000, streambox=-2999),
-        after=_period_rows("2026-02", metro=-1500, streambox=-2999, raw=-200),
+        before=_period_rows("2026-01", metro=1000, streambox=2999, direction="debit"),
+        after=_period_rows("2026-02", metro=1500, streambox=2999, raw=200, direction="debit"),
     )
 
     assert explanation.before_net_amount_minor == -3999
