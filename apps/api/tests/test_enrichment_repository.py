@@ -21,6 +21,8 @@ def test_enrichment_migration_is_idempotent_and_keeps_annotations_local(
             "merchants",
             "merchant_aliases",
             "categories",
+            "recurring_candidate_generations",
+            "recurring_candidate_state",
             "recurring_candidate_members",
             "transaction_merchant_annotations",
         } <= tables

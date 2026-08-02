@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -143,7 +144,9 @@ def test_credits_and_irregular_repeats_are_not_recurring_candidates() -> None:
     assert detect_recurring_candidates(transactions, matches_by_transaction_id={}) == []
 
 
-def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: Path) -> None:
+def test_replacing_recurring_candidates_activates_one_complete_generation(
+    tmp_path: Path,
+) -> None:
     repository = EnrichmentRepository(tmp_path / "spend-memory.duckdb")
     first = detect_recurring_candidates(
         [_transaction(value, 1000, "FIRST PLAN") for value in ("2026-01-02", "2026-02-02", "2026-03-02")],
@@ -163,27 +166,112 @@ def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: P
     )
 
     repository.replace_recurring_candidates(first)
-    with duckdb.connect(str(repository.database_path), read_only=True) as connection:
-        assert connection.execute(
-            "SELECT raw_transaction_id FROM recurring_candidate_members ORDER BY raw_transaction_id"
-        ).fetchall() == [(raw_transaction_id,) for raw_transaction_id in sorted(first[0].raw_transaction_ids)]
+    assert _active_recurring_rows(repository) == [
+        (first[0].candidate_key, 1000, raw_transaction_id)
+        for raw_transaction_id in sorted(first[0].raw_transaction_ids)
+    ]
     repository.replace_recurring_candidates(second)
+    assert _active_recurring_rows(repository) == [
+        (second[0].candidate_key, 2000, raw_transaction_id)
+        for raw_transaction_id in sorted(second[0].raw_transaction_ids)
+    ]
+
+
+def test_failed_recurring_refresh_keeps_prior_active_generation_and_members(
+    tmp_path: Path,
+) -> None:
+    repository = EnrichmentRepository(tmp_path / "spend-memory.duckdb")
+    first = detect_recurring_candidates(
+        [
+            _transaction(value, 1000, "FIRST PLAN")
+            for value in ("2026-01-02", "2026-02-02", "2026-03-02")
+        ],
+        matches_by_transaction_id={},
+    )
+    second = detect_recurring_candidates(
+        [
+            _transaction(value, 2000, "SECOND PLAN")
+            for value in ("2026-01-02", "2026-02-02", "2026-03-02")
+        ],
+        matches_by_transaction_id={},
+    )
+    _store_raw_transactions(repository, list(first[0].raw_transaction_ids))
+    repository.replace_recurring_candidates(first)
+    active_before = _active_recurring_rows(repository)
+
+    missing_raw_transaction_id = uuid4()
+    invalid_candidate = replace(
+        second[0], raw_transaction_ids=(missing_raw_transaction_id,)
+    )
+    with pytest.raises(duckdb.ConstraintException):
+        repository.replace_recurring_candidates([invalid_candidate])
+
+    assert _active_recurring_rows(repository) == active_before
     with duckdb.connect(str(repository.database_path), read_only=True) as connection:
         assert connection.execute(
-            "SELECT candidate_key, status, amount_min_minor FROM recurring_candidates"
-        ).fetchall() == [(second[0].candidate_key, "candidate", 2000)]
-        assert connection.execute(
-            "SELECT raw_transaction_id FROM recurring_candidate_members ORDER BY raw_transaction_id"
-        ).fetchall() == [(raw_transaction_id,) for raw_transaction_id in sorted(second[0].raw_transaction_ids)]
+            "SELECT count(*) FROM recurring_candidate_generations"
+        ).fetchone() == (2,)
+
+
+def test_empty_recurring_refresh_activates_an_empty_generation(tmp_path: Path) -> None:
+    repository = EnrichmentRepository(tmp_path / "spend-memory.duckdb")
+    first = detect_recurring_candidates(
+        [
+            _transaction(value, 1000, "FIRST PLAN")
+            for value in ("2026-01-02", "2026-02-02", "2026-03-02")
+        ],
+        matches_by_transaction_id={},
+    )
+    _store_raw_transactions(repository, list(first[0].raw_transaction_ids))
+    repository.replace_recurring_candidates(first)
+    with duckdb.connect(str(repository.database_path), read_only=True) as connection:
+        previous_generation_id = connection.execute(
+            "SELECT active_generation_id FROM recurring_candidate_state"
+        ).fetchone()[0]
+
     repository.replace_recurring_candidates([])
 
     with duckdb.connect(str(repository.database_path), read_only=True) as connection:
         assert connection.execute(
-            "SELECT candidate_key, status, amount_min_minor FROM recurring_candidates"
-        ).fetchall() == []
+            "SELECT active_generation_id FROM recurring_candidate_state"
+        ).fetchone()[0] != previous_generation_id
         assert connection.execute(
-            "SELECT count(*) FROM recurring_candidate_members"
+            """
+            SELECT count(*)
+            FROM recurring_candidates c
+            JOIN recurring_candidate_state s
+              ON s.active_generation_id = c.generation_id
+            """
         ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM recurring_candidates WHERE generation_id = ?",
+            [previous_generation_id],
+        ).fetchone() == (1,)
+        assert connection.execute(
+            """
+            SELECT count(*)
+            FROM recurring_candidate_members m
+            JOIN recurring_candidates c USING (recurring_candidate_id)
+            WHERE c.generation_id = ?
+            """,
+            [previous_generation_id],
+        ).fetchone() == (3,)
+
+
+def _active_recurring_rows(
+    repository: EnrichmentRepository,
+) -> list[tuple[str, int, UUID]]:
+    with duckdb.connect(str(repository.database_path), read_only=True) as connection:
+        return connection.execute(
+            """
+            SELECT c.candidate_key, c.amount_min_minor, m.raw_transaction_id
+            FROM recurring_candidate_state s
+            JOIN recurring_candidates c
+              ON c.generation_id = s.active_generation_id
+            JOIN recurring_candidate_members m USING (recurring_candidate_id)
+            ORDER BY m.raw_transaction_id
+            """
+        ).fetchall()
 
 
 def _store_raw_transactions(

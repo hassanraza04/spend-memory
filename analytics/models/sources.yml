@@ -16,4 +16,6 @@ sources:
       - name: merchant_category_assignments
       - name: transaction_category_overrides
       - name: transaction_merchant_annotations
+      - name: recurring_candidate_generations
+      - name: recurring_candidate_state
       - name: recurring_candidates

@@ -347,6 +347,16 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ORDER BY constraint_text
             """
         ).fetchall()
+        generation_foreign_keys = connection.execute(
+            """
+            SELECT table_name, constraint_text
+            FROM duckdb_constraints()
+            WHERE table_name IN ('recurring_candidates', 'recurring_candidate_state')
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_text LIKE '%generation%'
+            ORDER BY table_name
+            """
+        ).fetchall()
         tables = {
             row[0]
             for row in connection.execute(
@@ -363,6 +373,7 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ("0002_raw_amount_normalization",),
         ("0003_enrichment",),
         ("0004_recurring_candidate_members",),
+        ("0005_recurring_candidate_generations",),
     ]
     assert {
         "source_documents",
@@ -370,6 +381,8 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         "raw_transactions",
         "import_errors",
         "recurring_candidate_members",
+        "recurring_candidate_generations",
+        "recurring_candidate_state",
     } <= tables
     assert member_constraints == [
         ("FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",),
@@ -377,6 +390,22 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             (
                 "FOREIGN KEY (recurring_candidate_id) REFERENCES "
                 "recurring_candidates(recurring_candidate_id)"
+            ),
+        ),
+    ]
+    assert generation_foreign_keys == [
+        (
+            "recurring_candidate_state",
+            (
+                "FOREIGN KEY (active_generation_id) REFERENCES "
+                "recurring_candidate_generations(generation_id)"
+            ),
+        ),
+        (
+            "recurring_candidates",
+            (
+                "FOREIGN KEY (generation_id) REFERENCES "
+                "recurring_candidate_generations(generation_id)"
             ),
         ),
     ]
@@ -418,6 +447,84 @@ def test_failed_migration_rolls_back_schema_and_migration_ledger(
 
     assert "migration_probe" not in tables
     assert "storage_migrations" not in tables
+
+
+def test_generation_migration_preserves_existing_recurring_lineage(
+    tmp_path: Path,
+) -> None:
+    repository = _repository_module()
+    database_path = tmp_path / "spend-memory.duckdb"
+    prior_migrations = tmp_path / "prior-migrations"
+    prior_migrations.mkdir()
+    bundled_migrations = Path(repository.__file__).parent / "migrations"
+    for migration_path in sorted(bundled_migrations.glob("000[1-4]_*.sql")):
+        (prior_migrations / migration_path.name).write_text(
+            migration_path.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    repository.apply_migrations(
+        database_path, migration_directory=prior_migrations
+    )
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO source_documents
+            SELECT uuid(), 'generation-upgrade', 'test.csv', 'text/csv', 0,
+                   'test.csv', now()
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_runs (
+                run_id, document_id, parser_id, parser_version, is_active
+            )
+            SELECT uuid(), document_id, 'synthetic', 'v1', true
+            FROM source_documents
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO raw_transactions (
+                raw_transaction_id, import_run_id, source_ordinal, date_text,
+                description_text, amount_text, extraction_method,
+                extraction_confidence
+            )
+            SELECT uuid(), run_id, 1, '2026-01-01', 'Legacy plan', '-100',
+                   'synthetic', 1
+            FROM import_runs
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO recurring_candidates
+            SELECT uuid(), 'legacy-key', 'synthetic-account', NULL,
+                   'legacy plan', 'AED', 'debit', 'monthly', DATE '2026-01-01',
+                   DATE '2026-03-01', 100, 100, DATE '2026-04-01',
+                   DATE '2026-04-03', 1, '{}', 'candidate', 'v1'
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO recurring_candidate_members
+            SELECT recurring_candidate_id, raw_transaction_id
+            FROM recurring_candidates CROSS JOIN raw_transactions
+            """
+        )
+
+    repository.apply_migrations(database_path)
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        assert connection.execute(
+            """
+            SELECT c.candidate_key, g.candidate_count, g.member_count,
+                   m.raw_transaction_id = t.raw_transaction_id
+            FROM recurring_candidate_state s
+            JOIN recurring_candidate_generations g
+              ON g.generation_id = s.active_generation_id
+            JOIN recurring_candidates c USING (generation_id)
+            JOIN recurring_candidate_members m USING (recurring_candidate_id)
+            JOIN raw_transactions t USING (raw_transaction_id)
+            """
+        ).fetchone() == ("legacy-key", 1, 1, True)
 
 
 def test_source_document_identity_is_the_sha256_of_original_bytes(

@@ -297,13 +297,9 @@ class EnrichmentRepository:
             database_write_lock(self.database_path),
             duckdb.connect(str(self.database_path)) as connection,
         ):
-            # DuckDB checks foreign-key references against the transaction's
-            # original snapshot. Commit the child deletion before deleting its
-            # parents, otherwise the parent delete is rejected.
-            connection.execute("DELETE FROM recurring_candidate_members")
             connection.execute("BEGIN TRANSACTION")
             try:
-                connection.execute("DELETE FROM recurring_candidates")
+                generation_id = uuid4()
                 candidate_rows: list[list[object]] = []
                 member_rows: list[list[object]] = []
                 for candidate in candidates:
@@ -311,6 +307,7 @@ class EnrichmentRepository:
                     candidate_rows.append(
                         [
                             recurring_candidate_id,
+                            generation_id,
                             candidate.candidate_key,
                             candidate.account_identity,
                             candidate.merchant_id,
@@ -333,19 +330,29 @@ class EnrichmentRepository:
                         [recurring_candidate_id, raw_transaction_id]
                         for raw_transaction_id in candidate.raw_transaction_ids
                     )
+                connection.execute(
+                    """
+                    INSERT INTO recurring_candidate_generations (
+                        generation_id, candidate_count, member_count
+                    ) VALUES (?, ?, ?)
+                    """,
+                    [generation_id, len(candidate_rows), len(member_rows)],
+                )
                 if candidate_rows:
                     connection.executemany(
                         """
                         INSERT INTO recurring_candidates (
-                            recurring_candidate_id, candidate_key, account_identity, merchant_id,
-                            normalized_descriptor, currency, direction, cadence,
-                            first_transaction_date, last_transaction_date, amount_min_minor,
-                            amount_max_minor, expected_next_start, expected_next_end, confidence,
+                            recurring_candidate_id, generation_id, candidate_key,
+                            account_identity, merchant_id, normalized_descriptor,
+                            currency, direction, cadence, first_transaction_date,
+                            last_transaction_date, amount_min_minor, amount_max_minor,
+                            expected_next_start, expected_next_end, confidence,
                             evidence_json, status, enrichment_version
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
                         """,
                         candidate_rows,
                     )
+                if member_rows:
                     connection.executemany(
                         """
                         INSERT INTO recurring_candidate_members (
@@ -354,6 +361,28 @@ class EnrichmentRepository:
                         """,
                         member_rows,
                     )
+                stored_counts = connection.execute(
+                    """
+                    SELECT
+                        count(DISTINCT c.recurring_candidate_id),
+                        count(m.raw_transaction_id)
+                    FROM recurring_candidate_generations g
+                    LEFT JOIN recurring_candidates c USING (generation_id)
+                    LEFT JOIN recurring_candidate_members m USING (recurring_candidate_id)
+                    WHERE g.generation_id = ?
+                    """,
+                    [generation_id],
+                ).fetchone()
+                if stored_counts != (len(candidate_rows), len(member_rows)):
+                    raise RuntimeError("recurring_generation_incomplete")
+                connection.execute(
+                    """
+                    UPDATE recurring_candidate_state
+                    SET active_generation_id = ?, updated_at = now()
+                    WHERE state_key = 'active'
+                    """,
+                    [generation_id],
+                )
                 connection.execute("COMMIT")
             except BaseException:
                 connection.execute("ROLLBACK")
@@ -438,7 +467,10 @@ class EnrichmentRepository:
             recurring_count, duplicate_count, unusual_count = connection.execute(
                 """
                 SELECT
-                    (SELECT count(*) FROM recurring_candidates),
+                    (SELECT count(*)
+                     FROM recurring_candidates c
+                     JOIN recurring_candidate_state s
+                       ON s.active_generation_id = c.generation_id),
                     (SELECT count(*) FROM duplicate_review_candidates),
                     (SELECT count(*) FROM unusual_spend_candidates)
                 """

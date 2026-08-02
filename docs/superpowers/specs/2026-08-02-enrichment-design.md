@@ -65,6 +65,8 @@ Recurring analysis groups debit transactions by confirmed merchant when availabl
 
 The first implementation is rules-based and produces candidates, not automatic subscriptions. Each candidate explains its observed dates, amount range, cadence, and expected next window. A classifier is only considered after the rule evaluation shows a real gap on labelled synthetic cases.
 
+Recurring candidate refreshes are append-only generations. A refresh stores and validates every candidate and source-transaction membership under a new generation, then changes the single active-generation pointer as the transaction's final operation. Readers join through that pointer, so they see either the prior complete generation or the new complete generation. A failed or empty refresh never deletes the prior generation or its lineage rows. Empty generations can become active to represent a successful refresh with no candidates.
+
 ## Possible duplicates and unusual spending
 
 Duplicate detection adds evidence to possible transaction pairs. It scores matching or near-matching merchant or normalized descriptor, amount, currency, direction, and time distance. It must preserve legitimate repeated purchases, refunds, and reversals as distinct outcomes when the evidence does not support a duplicate candidate.
