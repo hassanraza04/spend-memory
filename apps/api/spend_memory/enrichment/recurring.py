@@ -3,9 +3,14 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 from hashlib import sha256
+from itertools import pairwise
 from uuid import UUID
 
-from spend_memory.enrichment.models import MerchantMatch, RecurringCandidate, TrustedTransaction
+from spend_memory.enrichment.models import (
+    MerchantMatch,
+    RecurringCandidate,
+    TrustedTransaction,
+)
 
 CADENCES = {
     "weekly": (5, 9),
@@ -41,7 +46,7 @@ def detect_recurring_candidates(
         amounts = [abs(row.amount_minor) for row in rows]
         intervals = [
             (later.transaction_date - earlier.transaction_date).days
-            for earlier, later in zip(rows, rows[1:])
+            for earlier, later in pairwise(rows)
         ]
         cadence = next(
             (

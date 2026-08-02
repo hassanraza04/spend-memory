@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import duckdb
@@ -12,10 +13,14 @@ from spend_memory.enrichment.models import (
     Merchant,
     MerchantMatch,
     RecurringCandidate,
+    TrustedTransaction,
     UnusualSpendCandidate,
 )
 from spend_memory.enrichment.normalization import normalize_descriptor
 from spend_memory.storage.repository import apply_migrations, database_write_lock
+
+if TYPE_CHECKING:
+    from spend_memory.enrichment.service import RefreshResult
 
 
 class EnrichmentRepository:
@@ -178,6 +183,113 @@ class EnrichmentRepository:
             ],
         )
 
+    def list_trusted_transactions(self) -> list[TrustedTransaction]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT raw_transaction_id, account_identity, transaction_date,
+                        description, currency, amount_minor, direction
+                    FROM analytics.mart_transactions
+                    ORDER BY transaction_date, raw_transaction_id
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            TrustedTransaction(
+                raw_transaction_id=raw_transaction_id,
+                account_identity=account_identity,
+                transaction_date=transaction_date,
+                description=description,
+                normalized_description=normalize_descriptor(description),
+                currency=currency,
+                amount_minor=amount_minor,
+                direction=direction,
+            )
+            for (
+                raw_transaction_id,
+                account_identity,
+                transaction_date,
+                description,
+                currency,
+                amount_minor,
+                direction,
+            ) in rows
+        ]
+
+    def replace_merchant_annotations(
+        self, matches: dict[UUID, MerchantMatch]
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.execute("DELETE FROM transaction_merchant_annotations")
+                rows = [
+                    [
+                        raw_transaction_id,
+                        match.merchant_id,
+                        match.status,
+                        match.confidence,
+                        match.method,
+                        json.dumps(match.evidence, sort_keys=True),
+                        "v1",
+                    ]
+                    for raw_transaction_id, match in matches.items()
+                ]
+                if rows:
+                    connection.executemany(
+                        """
+                        INSERT INTO transaction_merchant_annotations (
+                            raw_transaction_id, merchant_id, resolution_status,
+                            confidence, method, evidence_json, enrichment_version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
+    def record_confirmed_currencies(
+        self,
+        transactions: list[TrustedTransaction],
+        matches: dict[UUID, MerchantMatch],
+    ) -> None:
+        rows = sorted(
+            {
+                (match.merchant_id, transaction.currency)
+                for transaction in transactions
+                if (match := matches[transaction.raw_transaction_id]).status
+                == "confirmed"
+                and match.merchant_id is not None
+            },
+            key=lambda row: (str(row[0]), row[1]),
+        )
+        if not rows:
+            return
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.executemany(
+                    """
+                    INSERT INTO merchant_currency_observations (merchant_id, currency)
+                    VALUES (?, ?) ON CONFLICT DO NOTHING
+                    """,
+                    rows,
+                )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
     def replace_recurring_candidates(
         self, candidates: list[RecurringCandidate]
     ) -> None:
@@ -295,6 +407,34 @@ class EnrichmentRepository:
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
+
+    def summarize_refresh(
+        self, matches: dict[UUID, MerchantMatch]
+    ) -> RefreshResult:
+        from spend_memory.enrichment.service import RefreshResult
+
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            recurring_count, duplicate_count, unusual_count = connection.execute(
+                """
+                SELECT
+                    (SELECT count(*) FROM recurring_candidates),
+                    (SELECT count(*) FROM duplicate_review_candidates),
+                    (SELECT count(*) FROM unusual_spend_candidates)
+                """
+            ).fetchone()
+        status_counts = {
+            status: sum(match.status == status for match in matches.values())
+            for status in ("confirmed", "suggested", "unresolved")
+        }
+        return RefreshResult(
+            transaction_count=len(matches),
+            confirmed_merchant_count=status_counts["confirmed"],
+            suggested_merchant_count=status_counts["suggested"],
+            unresolved_merchant_count=status_counts["unresolved"],
+            recurring_candidate_count=recurring_count,
+            duplicate_candidate_count=duplicate_count,
+            unusual_spend_candidate_count=unusual_count,
+        )
 
     def _write(self, query: str, parameters: list[object]) -> None:
         with (

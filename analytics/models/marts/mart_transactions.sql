@@ -28,7 +28,7 @@ select
   transactions.net_amount_minor,
   annotation.merchant_id,
   coalesce(override.category_id, assignment.category_id) as category_id,
-  cast(null as varchar) as recurring_group_id,
+  cast(null as varchar) as recurring_group_id, -- Review candidates are not confirmed facts.
   coalesce(annotation.enrichment_version, 'unavailable') as enrichment_version
 from {{ ref('stg_transactions') }} as transactions
 join {{ ref('int_import_reconciliation') }} as reconciliation

@@ -63,11 +63,14 @@ models:
       - name: enrichment_version
 
   - name: mart_recurring_groups
-    description: Recurring group dimension. Empty until review candidates are mapped.
+    description: Review-candidate dimension. Rows are not confirmed transaction facts.
     columns:
       - name: recurring_group_id
+        tests: [not_null, unique]
       - name: recurring_group_label
+        tests: [not_null]
       - name: enrichment_version
+        tests: [not_null]
 
   - name: mart_monthly_summary
     tests:

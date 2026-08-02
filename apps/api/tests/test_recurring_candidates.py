@@ -6,10 +6,9 @@ from uuid import uuid4
 
 import duckdb
 import pytest
-
 from spend_memory.enrichment.models import MerchantMatch, TrustedTransaction
-from spend_memory.enrichment.recurring import detect_recurring_candidates
 from spend_memory.enrichment.normalization import normalize_descriptor
+from spend_memory.enrichment.recurring import detect_recurring_candidates
 from spend_memory.enrichment.repository import EnrichmentRepository
 
 
