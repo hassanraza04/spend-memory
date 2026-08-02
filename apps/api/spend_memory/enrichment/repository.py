@@ -300,7 +300,30 @@ class EnrichmentRepository:
             connection.execute("BEGIN TRANSACTION")
             try:
                 connection.execute("DELETE FROM recurring_candidates")
-                connection.executemany(
+                rows = [
+                    [
+                        uuid4(),
+                        candidate.candidate_key,
+                        candidate.account_identity,
+                        candidate.merchant_id,
+                        candidate.normalized_descriptor,
+                        candidate.currency,
+                        candidate.direction,
+                        candidate.cadence,
+                        candidate.first_transaction_date,
+                        candidate.last_transaction_date,
+                        candidate.amount_min_minor,
+                        candidate.amount_max_minor,
+                        candidate.expected_next_start,
+                        candidate.expected_next_end,
+                        candidate.confidence,
+                        json.dumps(candidate.evidence, sort_keys=True),
+                        "v1",
+                    ]
+                    for candidate in candidates
+                ]
+                if rows:
+                    connection.executemany(
                     """
                     INSERT INTO recurring_candidates (
                         recurring_candidate_id, candidate_key, account_identity, merchant_id,
@@ -310,29 +333,8 @@ class EnrichmentRepository:
                         evidence_json, status, enrichment_version
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
                     """,
-                    [
-                        [
-                            uuid4(),
-                            candidate.candidate_key,
-                            candidate.account_identity,
-                            candidate.merchant_id,
-                            candidate.normalized_descriptor,
-                            candidate.currency,
-                            candidate.direction,
-                            candidate.cadence,
-                            candidate.first_transaction_date,
-                            candidate.last_transaction_date,
-                            candidate.amount_min_minor,
-                            candidate.amount_max_minor,
-                            candidate.expected_next_start,
-                            candidate.expected_next_end,
-                            candidate.confidence,
-                            json.dumps(candidate.evidence, sort_keys=True),
-                            "v1",
-                        ]
-                        for candidate in candidates
-                    ],
-                )
+                        rows,
+                    )
                 connection.execute("COMMIT")
             except BaseException:
                 connection.execute("ROLLBACK")

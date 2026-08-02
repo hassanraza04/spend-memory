@@ -130,8 +130,9 @@ def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: P
 
     repository.replace_recurring_candidates(first)
     repository.replace_recurring_candidates(second)
+    repository.replace_recurring_candidates([])
 
     with duckdb.connect(str(repository.database_path), read_only=True) as connection:
         assert connection.execute(
             "SELECT candidate_key, status, amount_min_minor FROM recurring_candidates"
-        ).fetchall() == [(second[0].candidate_key, "candidate", 2000)]
+        ).fetchall() == []
