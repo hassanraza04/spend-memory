@@ -6,6 +6,8 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from spend_memory.enrichment.models import Merchant, MerchantMatch
+from spend_memory.enrichment.repository import EnrichmentRepository
 from spend_memory.ingestion.parsers.canonical_csv import CanonicalCsvParser
 from spend_memory.ingestion.parsers.synthetic_pdf_a import SyntheticAedTabularPdfParser
 from spend_memory.ingestion.parsers.synthetic_pdf_b import SyntheticPkrCompactPdfParser
@@ -65,6 +67,116 @@ def _dbt_build(database_path: Path, select: str | None = None) -> None:
     if select:
         command.extend(["--select", *(f"+{model}" for model in select.split())])
     subprocess.run(command, check=True, env=environment, text=True)
+
+
+def _trusted_transaction_id(database_path: Path, description: str):
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        return connection.execute(
+            "select raw_transaction_id from raw_transactions where description_text = ?",
+            [description],
+        ).fetchone()[0]
+
+
+def _confirmed_match(merchant: Merchant) -> MerchantMatch:
+    return MerchantMatch(
+        merchant.merchant_id,
+        merchant.merchant_name,
+        "confirmed",
+        1.0,
+        "confirmed_alias",
+        {},
+    )
+
+
+def _suggested_match(merchant: Merchant) -> MerchantMatch:
+    return MerchantMatch(
+        merchant.merchant_id,
+        merchant.merchant_name,
+        "suggested",
+        0.9,
+        "char_ngram_tfidf",
+        {},
+    )
+
+
+def test_mart_transactions_exposes_only_confirmed_merchant_and_category(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    enrichment = EnrichmentRepository(database_path)
+    merchant = enrichment.create_merchant("MetroMart")
+    groceries = enrichment.create_category("Groceries")
+    enrichment.assign_merchant_category(merchant.merchant_id, groceries.category_id)
+    transaction_id = _trusted_transaction_id(database_path, "METRO MART")
+    enrichment.save_merchant_annotation(transaction_id, _confirmed_match(merchant))
+    suggested_id = _trusted_transaction_id(database_path, "METRO-MART")
+    enrichment.save_merchant_annotation(suggested_id, _suggested_match(merchant))
+
+    _dbt_build(
+        database_path,
+        "mart_transactions mart_merchants mart_categories mart_category_summary",
+    )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        rows = connection.execute(
+            """
+            select raw_transaction_id, merchant_id, category_id
+            from analytics.mart_transactions
+            where raw_transaction_id in (?, ?)
+            """,
+            [transaction_id, suggested_id],
+        ).fetchall()
+        category_labels = connection.execute(
+            """
+            with transaction_context as (
+              select account_identity, currency
+              from analytics.mart_transactions
+              where raw_transaction_id = ?
+            )
+            select summary.category_id, summary.category_label
+            from analytics.mart_category_summary as summary
+            join transaction_context using (account_identity, currency)
+            where summary.category_id = ? or summary.category_id is null
+            """,
+            [suggested_id, groceries.category_id],
+        ).fetchall()
+        suggested_summary = connection.execute(
+            """
+            with suggested as (
+              select account_identity, currency, net_amount_minor
+              from analytics.mart_transactions
+              where raw_transaction_id = ?
+            ), other_uncategorized as (
+              select
+                count(*) as transaction_count,
+                coalesce(sum(transactions.net_amount_minor), 0)::bigint as net_amount_minor
+              from analytics.mart_transactions as transactions
+              join suggested using (account_identity, currency)
+              where transactions.category_id is null
+                and transactions.raw_transaction_id <> ?
+            )
+            select
+              summary.transaction_count,
+              summary.net_amount_minor,
+              other_uncategorized.transaction_count,
+              other_uncategorized.net_amount_minor,
+              suggested.net_amount_minor
+            from analytics.mart_category_summary as summary
+            join suggested using (account_identity, currency)
+            cross join other_uncategorized
+            where summary.category_id is null
+            """,
+            [suggested_id, suggested_id],
+        ).fetchone()
+    assert set(rows) == {
+        (transaction_id, merchant.merchant_id, groceries.category_id),
+        (suggested_id, None, None),
+    }
+    assert (groceries.category_id, "Groceries") in category_labels
+    assert (None, "uncategorized") in category_labels
+    summary_count, summary_net, other_count, other_net, suggested_net = suggested_summary
+    assert summary_count == other_count + 1
+    assert summary_net == other_net + suggested_net
 
 
 def test_dbt_builds_staging_models_from_active_imports(tmp_path: Path) -> None:

@@ -41,27 +41,36 @@ models:
           - accepted_values:
               arguments:
                 values: [debit, credit]
+      - name: merchant_id
+        description: Nullable until a merchant annotation is confirmed.
+      - name: category_id
+        description: Nullable until a category is confirmed.
+      - name: enrichment_version
+        description: Nullable enrichment fields use unavailable when no annotation exists.
 
   - name: mart_merchants
-    description: Future merchant dimension. Empty until enrichment is available.
+    description: Local merchant dimension.
     columns:
       - name: merchant_id
       - name: merchant_name
       - name: enrichment_version
 
   - name: mart_categories
-    description: Future category dimension. Empty until enrichment is available.
+    description: Local category dimension.
     columns:
       - name: category_id
       - name: category_label
       - name: enrichment_version
 
   - name: mart_recurring_groups
-    description: Future recurring group dimension. Empty until enrichment is available.
+    description: Review-candidate dimension. Rows are not confirmed transaction facts.
     columns:
       - name: recurring_group_id
+        tests: [not_null, unique]
       - name: recurring_group_label
+        tests: [not_null]
       - name: enrichment_version
+        tests: [not_null]
 
   - name: mart_monthly_summary
     tests:

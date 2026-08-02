@@ -75,7 +75,7 @@ def _import_gate(key: tuple[str, str, str]) -> Iterator[None]:
 
 
 @contextmanager
-def _database_write_lock(database_path: Path) -> Iterator[None]:
+def database_write_lock(database_path: Path) -> Iterator[None]:
     """Serialize every DuckDB writer in this process and across local workers."""
     resolved_database_path = database_path.resolve()
     gate_key = str(resolved_database_path)
@@ -185,7 +185,7 @@ def apply_migrations(
     migration_directory = migration_directory or storage_directory / "migrations"
 
     with (
-        _database_write_lock(database_path),
+        database_write_lock(database_path),
         duckdb.connect(str(database_path)) as connection,
     ):
         connection.execute("BEGIN TRANSACTION")
@@ -290,7 +290,7 @@ class ImportRepository:
             _document_file_lock(self.data_directory.resolve(), document_sha256),
         ):
             with (
-                _database_write_lock(self.database_path),
+                database_write_lock(self.database_path),
                 duckdb.connect(str(self.database_path)) as connection,
             ):
                 existing = connection.execute(
@@ -432,7 +432,7 @@ class ImportRepository:
         final_path: Path,
     ) -> ImportResult:
         with (
-            _database_write_lock(self.database_path),
+            database_write_lock(self.database_path),
             duckdb.connect(str(self.database_path)) as connection,
         ):
             existing = connection.execute(
@@ -491,7 +491,7 @@ class ImportRepository:
 
         try:
             with (
-                _database_write_lock(self.database_path),
+                database_write_lock(self.database_path),
                 duckdb.connect(str(self.database_path)) as connection,
             ):
                 connection.execute("BEGIN TRANSACTION")
@@ -672,7 +672,7 @@ class ImportRepository:
         code: str,
     ) -> None:
         with (
-            _database_write_lock(self.database_path),
+            database_write_lock(self.database_path),
             duckdb.connect(str(self.database_path)) as connection,
         ):
             connection.execute(
