@@ -6,7 +6,12 @@ from uuid import UUID, uuid4
 
 import duckdb
 
-from spend_memory.enrichment.models import Category, Merchant, MerchantMatch
+from spend_memory.enrichment.models import (
+    Category,
+    Merchant,
+    MerchantMatch,
+    RecurringCandidate,
+)
 from spend_memory.enrichment.normalization import normalize_descriptor
 from spend_memory.storage.repository import apply_migrations, database_write_lock
 
@@ -166,6 +171,51 @@ class EnrichmentRepository:
                 "v1",
             ],
         )
+
+    def replace_recurring_candidates(self, candidates: list[RecurringCandidate]) -> None:
+        with database_write_lock(self.database_path), duckdb.connect(
+            str(self.database_path)
+        ) as connection:
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.execute("DELETE FROM recurring_candidates")
+                connection.executemany(
+                    """
+                    INSERT INTO recurring_candidates (
+                        recurring_candidate_id, candidate_key, account_identity, merchant_id,
+                        normalized_descriptor, currency, direction, cadence,
+                        first_transaction_date, last_transaction_date, amount_min_minor,
+                        amount_max_minor, expected_next_start, expected_next_end, confidence,
+                        evidence_json, status, enrichment_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
+                    """,
+                    [
+                        [
+                            uuid4(),
+                            candidate.candidate_key,
+                            candidate.account_identity,
+                            candidate.merchant_id,
+                            candidate.normalized_descriptor,
+                            candidate.currency,
+                            candidate.direction,
+                            candidate.cadence,
+                            candidate.first_transaction_date,
+                            candidate.last_transaction_date,
+                            candidate.amount_min_minor,
+                            candidate.amount_max_minor,
+                            candidate.expected_next_start,
+                            candidate.expected_next_end,
+                            candidate.confidence,
+                            json.dumps(candidate.evidence, sort_keys=True),
+                            "v1",
+                        ]
+                        for candidate in candidates
+                    ],
+                )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
 
     def _write(self, query: str, parameters: list[object]) -> None:
         with database_write_lock(self.database_path), duckdb.connect(
