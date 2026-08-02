@@ -1,5 +1,5 @@
 select
-  cast(null as varchar) as category_id,
-  cast(null as varchar) as category_label,
-  cast(null as varchar) as enrichment_version
-where false
+  category_id,
+  category_label,
+  'v1' as enrichment_version
+from {{ source('spend_memory', 'categories') }}

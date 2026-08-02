@@ -1,5 +1,5 @@
 select
-  cast(null as varchar) as merchant_id,
-  cast(null as varchar) as merchant_name,
-  cast(null as varchar) as enrichment_version
-where false
+  merchant_id,
+  merchant_name,
+  'v1' as enrichment_version
+from {{ source('spend_memory', 'merchants') }}

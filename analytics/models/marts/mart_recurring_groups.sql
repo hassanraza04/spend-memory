@@ -1,3 +1,4 @@
+-- Recurring candidates do not form a confirmed dimension yet.
 select
   cast(null as varchar) as recurring_group_id,
   cast(null as varchar) as recurring_group_label,
