@@ -127,12 +127,12 @@ def test_currency_bonus_cap_preserves_the_raw_text_score(
     assert 0.97 < result.evidence["text_score"] < 1.0
 
 
-def test_merchant_evaluation_keeps_held_out_variants_out_of_the_corpus() -> None:
+def test_merchant_evaluation_uses_canonical_identity_without_held_out_aliases() -> None:
     metromart_id = uuid4()
     cafe_id = uuid4()
     examples = [
-        (metromart_id, "MetroMart", "METRO MART"),
-        (metromart_id, "MetroMart", "METRO MART ONLINE"),
+        (metromart_id, "Metro Mart Market", "METRO MART"),
+        (metromart_id, "Metro Mart Market", "METRO MART ONLINE"),
         (cafe_id, "Cafe Lane", "CAFE LANE"),
         (cafe_id, "Cafe Lane", "CAFE LANE DUBAI"),
     ]
@@ -140,10 +140,17 @@ def test_merchant_evaluation_keeps_held_out_variants_out_of_the_corpus() -> None
     corpus = retrieval_corpus(examples, held_out_merchant_ids={metromart_id})
     evaluation = evaluate_merchant_matches(examples, held_out_merchant_ids={metromart_id})
 
+    held_out_aliases = {
+        normalize_descriptor(descriptor)
+        for merchant_id, _, descriptor in examples
+        if merchant_id == metromart_id
+    }
+
     assert all(entry.merchant_id != metromart_id for entry in corpus)
-    assert evaluation.precision == 0.0
-    assert evaluation.recall == 0.0
-    assert evaluation.coverage == 0.0
+    assert held_out_aliases.isdisjoint(entry.alias for entry in corpus)
+    assert evaluation.precision == 1.0
+    assert evaluation.recall == 1.0
+    assert evaluation.coverage == 1.0
     assert evaluation.expected_calibration_error >= 0.0
     assert evaluation.baseline_precision == 0.0
     assert evaluation.baseline_recall == 0.0

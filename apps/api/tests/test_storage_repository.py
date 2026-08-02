@@ -338,6 +338,15 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         versions = connection.execute(
             "SELECT version FROM storage_migrations ORDER BY version"
         ).fetchall()
+        member_constraints = connection.execute(
+            """
+            SELECT constraint_text
+            FROM duckdb_constraints()
+            WHERE table_name = 'recurring_candidate_members'
+              AND constraint_type = 'FOREIGN KEY'
+            ORDER BY constraint_text
+            """
+        ).fetchall()
         tables = {
             row[0]
             for row in connection.execute(
@@ -362,6 +371,15 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         "import_errors",
         "recurring_candidate_members",
     } <= tables
+    assert member_constraints == [
+        ("FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",),
+        (
+            (
+                "FOREIGN KEY (recurring_candidate_id) REFERENCES "
+                "recurring_candidates(recurring_candidate_id)"
+            ),
+        ),
+    ]
 
 
 def test_failed_migration_rolls_back_schema_and_migration_ledger(
