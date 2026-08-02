@@ -168,7 +168,7 @@ class MerchantEvaluation:
 **Interfaces:**
 
 - Consumes: `apply_migrations(database_path)` and `analytics.mart_transactions` built by dbt.
-- Produces: `EnrichmentRepository`, including `create_merchant`, `confirm_alias`, `create_category`, `assign_merchant_category`, `set_transaction_category_override`, `list_trusted_transactions`, and candidate replacement methods used in Tasks 2 through 8.
+- Produces: `EnrichmentRepository`, including `create_merchant`, `confirm_alias`, `create_category`, `assign_merchant_category`, `set_transaction_category_override`, and the local persistence tables used by later candidate work. Typed trusted-mart reads and candidate replacement methods belong to Task 9, after their candidate records exist.
 
 - [ ] **Step 1: Write the failing migration and repository tests**
 
