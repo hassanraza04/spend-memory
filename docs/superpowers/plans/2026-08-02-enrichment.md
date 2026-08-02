@@ -395,11 +395,22 @@ def test_exact_confirmed_alias_is_a_confirmed_match(repository: EnrichmentReposi
     )
 
 
-def test_retrieval_is_a_suggestion_and_never_a_confirmed_fact(repository: EnrichmentRepository) -> None:
+def test_trailing_online_marker_normalizes_to_a_confirmed_alias(repository: EnrichmentRepository) -> None:
     merchant = repository.create_merchant("MetroMart")
     repository.confirm_alias("METRO MART", merchant.merchant_id)
 
     result = MerchantResolver(repository).resolve(_transaction("METRO MART ONLINE"))
+
+    assert result.status == "confirmed"
+    assert result.merchant_id == merchant.merchant_id
+    assert result.confidence == 1.0
+
+
+def test_retrieval_is_a_suggestion_and_never_a_confirmed_fact(repository: EnrichmentRepository) -> None:
+    merchant = repository.create_merchant("MetroMart")
+    repository.confirm_alias("METRO MART", merchant.merchant_id)
+
+    result = MerchantResolver(repository).resolve(_transaction("METRO MAR"))
 
     assert result.status == "suggested"
     assert result.merchant_id == merchant.merchant_id
@@ -419,17 +430,19 @@ Use only these transformations, in this order, so the behavior remains inspectab
 ```python
 _PREFIX = re.compile(r"^(?:pos|card|debit|payment|purchase|online)\\s+", re.I)
 _TERMINAL = re.compile(r"\\s+(?:term(?:inal)?|txn|ref|id|#)\\s*[a-z0-9-]+(?:\\s+|$)", re.I)
+_TRAILING_CHANNEL = re.compile(r"\s+online\s*$", re.I)
 _PUNCTUATION = re.compile(r"[^a-z0-9]+")
 
 
 def normalize_descriptor(value: str) -> str:
     normalized = _PREFIX.sub("", value.strip())
     normalized = _TERMINAL.sub(" ", normalized)
+    normalized = _TRAILING_CHANNEL.sub("", normalized)
     normalized = _PUNCTUATION.sub(" ", normalized.lower())
     return " ".join(normalized.split())
 ```
 
-Add test cases for empty input, payment prefixes, terminal fragments, punctuation, and an identifier embedded in a genuine merchant name. Keep every exception in a test before broadening a regex.
+Add test cases for empty input, payment prefixes, terminal fragments, the trailing `online` payment-channel marker, punctuation, and an identifier embedded in a genuine merchant name. Keep every exception in a test before broadening a regex.
 
 - [ ] **Step 4: Implement standard-library character n-gram TF-IDF retrieval**
 
