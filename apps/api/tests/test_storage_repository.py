@@ -352,6 +352,7 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
     assert versions == [
         ("0001_import_storage",),
         ("0002_raw_amount_normalization",),
+        ("0003_enrichment",),
     ]
     assert {
         "source_documents",
