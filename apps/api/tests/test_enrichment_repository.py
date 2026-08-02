@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import duckdb
+import pytest
 from spend_memory.enrichment.repository import EnrichmentRepository
 
 
@@ -68,3 +69,10 @@ def test_confirmed_alias_and_transaction_override_keep_lineage(tmp_path: Path) -
 
     assert repository.find_confirmed_alias("metro mart").merchant_id == merchant.merchant_id
     assert repository.find_transaction_category_override(transaction_id) == category
+
+
+def test_category_label_cannot_be_blank(tmp_path: Path) -> None:
+    repository = EnrichmentRepository(tmp_path / "spend-memory.duckdb")
+
+    with pytest.raises(ValueError, match="category_label_required"):
+        repository.create_category("   ")
