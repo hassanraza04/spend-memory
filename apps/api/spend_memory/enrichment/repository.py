@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import duckdb
 
 from spend_memory.enrichment.models import Category, Merchant, MerchantMatch
+from spend_memory.enrichment.normalization import normalize_descriptor
 from spend_memory.storage.repository import apply_migrations, database_write_lock
 
 
@@ -55,6 +56,29 @@ class EnrichmentRepository:
                 [_normalized_descriptor(descriptor)],
             ).fetchone()
         return None if row is None else Merchant(*row)
+
+    def confirmed_merchant_candidates(self) -> list[tuple[Merchant, str]]:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT merchants.merchant_id, merchants.merchant_name,
+                    merchant_aliases.normalized_descriptor
+                FROM merchant_aliases JOIN merchants USING (merchant_id)
+                UNION ALL
+                SELECT merchant_id, merchant_name, merchant_name FROM merchants
+                """
+            ).fetchall()
+        return [
+            (Merchant(merchant_id, name), normalize_descriptor(alias))
+            for merchant_id, name, alias in rows
+        ]
+
+    def confirmed_merchant_currencies(self) -> set[tuple[UUID, str]]:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            rows = connection.execute(
+                "SELECT merchant_id, currency FROM merchant_currency_observations"
+            ).fetchall()
+        return set(rows)
 
     def create_category(self, category_label: str) -> Category:
         category = Category(uuid4(), _required_text(category_label, "category_label"))
@@ -164,4 +188,4 @@ def _required_text(value: str, field: str) -> str:
 
 
 def _normalized_descriptor(descriptor: str) -> str:
-    return _required_text(descriptor, "descriptor").casefold()
+    return _required_text(normalize_descriptor(descriptor), "descriptor")
