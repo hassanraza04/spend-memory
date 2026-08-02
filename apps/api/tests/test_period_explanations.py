@@ -128,6 +128,17 @@ def test_period_explanation_handles_credits_with_integer_minor_units() -> None:
     assert "200 minor units more in" in explanation.text
 
 
+def test_period_explanation_calls_reduced_debits_less_out() -> None:
+    explanation = explain_period_change(
+        [_row(1, "2026-01", 500, "METRO MART")],
+        [_row(2, "2026-02", 300, "METRO MART")],
+    )
+
+    assert explanation.difference_net_amount_minor == 200
+    assert "200 minor units less out" in explanation.text
+    assert "more in" not in explanation.text
+
+
 def test_period_explanation_uses_an_unchanged_template_for_zero_difference() -> None:
     explanation = explain_period_change(
         [_row(1, "2026-01", 100, "METRO MART", merchant_name="MetroMart")],

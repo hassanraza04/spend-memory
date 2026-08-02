@@ -29,6 +29,16 @@ class MerchantCorpusEntry:
 def retrieval_corpus(
     examples: Iterable[tuple[UUID, str, str]], held_out_merchant_ids: set[UUID]
 ) -> list[MerchantCorpusEntry]:
+    examples = list(examples)
+    return [
+        *_alias_entries(examples, held_out_merchant_ids),
+        *_canonical_merchant_entries(examples),
+    ]
+
+
+def _alias_entries(
+    examples: Iterable[tuple[UUID, str, str]], held_out_merchant_ids: set[UUID]
+) -> list[MerchantCorpusEntry]:
     return [
         MerchantCorpusEntry(merchant_id, merchant_name, normalize_descriptor(descriptor))
         for merchant_id, merchant_name, descriptor in examples
@@ -92,11 +102,8 @@ def evaluate_merchant_matches(
     examples: Iterable[tuple[UUID, str, str]], held_out_merchant_ids: set[UUID]
 ) -> MerchantEvaluation:
     examples = list(examples)
-    alias_corpus = retrieval_corpus(examples, held_out_merchant_ids)
-    corpus = [
-        *alias_corpus,
-        *_canonical_merchant_entries(examples, held_out_merchant_ids),
-    ]
+    alias_corpus = _alias_entries(examples, held_out_merchant_ids)
+    corpus = retrieval_corpus(examples, held_out_merchant_ids)
     held_out_examples = [
         example for example in examples if example[0] in held_out_merchant_ids
     ]
@@ -113,12 +120,11 @@ def evaluate_merchant_matches(
 
 
 def _canonical_merchant_entries(
-    examples: Iterable[tuple[UUID, str, str]], held_out_merchant_ids: set[UUID]
+    examples: Iterable[tuple[UUID, str, str]],
 ) -> list[MerchantCorpusEntry]:
     canonical_names = {
         merchant_id: merchant_name
         for merchant_id, merchant_name, _ in examples
-        if merchant_id in held_out_merchant_ids
     }
     return [
         MerchantCorpusEntry(

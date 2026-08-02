@@ -54,7 +54,7 @@ def explain_period_change(
         difference_net_amount_minor=difference,
         contribution_total_minor=contribution_total,
         remainder_minor=remainder,
-        text=_text(difference, contributions, remainder),
+        text=_text(before, after, difference, contributions, remainder),
         contributions=tuple(contributions),
         before_raw_transaction_ids=_source_ids(before),
         after_raw_transaction_ids=_source_ids(after),
@@ -149,14 +149,26 @@ def _source_ids(rows: list[PeriodRow]) -> tuple[UUID, ...]:
 
 
 def _text(
-    difference: int, contributions: list[PeriodContribution], remainder: int
+    before: list[PeriodRow],
+    after: list[PeriodRow],
+    difference: int,
+    contributions: list[PeriodContribution],
+    remainder: int,
 ) -> str:
     if difference == 0:
         return "Spending was unchanged from the previous period."
-    direction = "more in" if difference > 0 else "more out"
-    sentences = [
-        f"Spending was {abs(difference)} minor units {direction} than the previous period."
-    ]
+    debit_change = _direction_total(after, "debit") - _direction_total(before, "debit")
+    credit_change = _direction_total(after, "credit") - _direction_total(before, "credit")
+    if debit_change and not credit_change:
+        direction = "more out" if debit_change > 0 else "less out"
+        summary = f"Spending was {abs(difference)} minor units {direction}"
+    elif credit_change and not debit_change:
+        direction = "more in" if credit_change > 0 else "less in"
+        summary = f"Activity was {abs(difference)} minor units {direction}"
+    else:
+        direction = "higher" if difference > 0 else "lower"
+        summary = f"Net activity was {abs(difference)} minor units {direction}"
+    sentences = [f"{summary} than the previous period."]
     sentences.extend(
         f"{item.label} accounted for {abs(item.amount_minor)} minor units."
         for item in contributions
@@ -164,3 +176,11 @@ def _text(
     if remainder:
         sentences.append(f"Other activity accounted for {abs(remainder)} minor units.")
     return " ".join(sentences)
+
+
+def _direction_total(rows: list[PeriodRow], direction: str) -> int:
+    return sum(
+        row.transaction.amount_minor
+        for row in rows
+        if row.transaction.direction == direction
+    )

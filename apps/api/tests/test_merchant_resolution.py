@@ -133,8 +133,8 @@ def test_merchant_evaluation_uses_canonical_identity_without_held_out_aliases() 
     examples = [
         (metromart_id, "Metro Mart Market", "METRO MART"),
         (metromart_id, "Metro Mart Market", "METRO MART ONLINE"),
-        (cafe_id, "Cafe Lane", "CAFE LANE"),
-        (cafe_id, "Cafe Lane", "CAFE LANE DUBAI"),
+        (cafe_id, "Cafe Lane House", "CAFE LANE"),
+        (cafe_id, "Cafe Lane House", "CAFE LANE DUBAI"),
     ]
 
     corpus = retrieval_corpus(examples, held_out_merchant_ids={metromart_id})
@@ -146,8 +146,14 @@ def test_merchant_evaluation_uses_canonical_identity_without_held_out_aliases() 
         if merchant_id == metromart_id
     }
 
-    assert all(entry.merchant_id != metromart_id for entry in corpus)
     assert held_out_aliases.isdisjoint(entry.alias for entry in corpus)
+    assert [entry.alias for entry in corpus if entry.merchant_id == metromart_id] == [
+        "metro mart market"
+    ]
+    assert any(
+        entry.merchant_id == cafe_id and entry.alias == "cafe lane house"
+        for entry in corpus
+    )
     assert evaluation.precision == 1.0
     assert evaluation.recall == 1.0
     assert evaluation.coverage == 1.0
