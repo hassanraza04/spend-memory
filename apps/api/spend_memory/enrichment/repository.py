@@ -8,9 +8,11 @@ import duckdb
 
 from spend_memory.enrichment.models import (
     Category,
+    DuplicateCandidate,
     Merchant,
     MerchantMatch,
     RecurringCandidate,
+    UnusualSpendCandidate,
 )
 from spend_memory.enrichment.normalization import normalize_descriptor
 from spend_memory.storage.repository import apply_migrations, database_write_lock
@@ -41,7 +43,9 @@ class EnrichmentRepository:
             [uuid4(), _normalized_descriptor(descriptor), merchant_id],
         )
 
-    def record_confirmed_merchant_currency(self, merchant_id: UUID, currency: str) -> None:
+    def record_confirmed_merchant_currency(
+        self, merchant_id: UUID, currency: str
+    ) -> None:
         self._write(
             """
             INSERT INTO merchant_currency_observations (merchant_id, currency)
@@ -145,7 +149,9 @@ class EnrichmentRepository:
             ).fetchone()
         return None if row is None else Category(*row)
 
-    def save_merchant_annotation(self, raw_transaction_id: UUID, match: MerchantMatch) -> None:
+    def save_merchant_annotation(
+        self, raw_transaction_id: UUID, match: MerchantMatch
+    ) -> None:
         self._write(
             """
             INSERT INTO transaction_merchant_annotations (
@@ -172,10 +178,13 @@ class EnrichmentRepository:
             ],
         )
 
-    def replace_recurring_candidates(self, candidates: list[RecurringCandidate]) -> None:
-        with database_write_lock(self.database_path), duckdb.connect(
-            str(self.database_path)
-        ) as connection:
+    def replace_recurring_candidates(
+        self, candidates: list[RecurringCandidate]
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
             connection.execute("BEGIN TRANSACTION")
             try:
                 connection.execute("DELETE FROM recurring_candidates")
@@ -217,10 +226,81 @@ class EnrichmentRepository:
                 connection.execute("ROLLBACK")
                 raise
 
+    def replace_duplicate_candidates(
+        self, candidates: list[DuplicateCandidate]
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.execute("DELETE FROM duplicate_review_candidates")
+                rows = [
+                    [
+                        uuid4(),
+                        *sorted(candidate.raw_transaction_ids),
+                        candidate.confidence,
+                        json.dumps(candidate.evidence, sort_keys=True),
+                        "v1",
+                    ]
+                    for candidate in candidates
+                ]
+                if rows:
+                    connection.executemany(
+                        """
+                        INSERT INTO duplicate_review_candidates (
+                            duplicate_candidate_id, first_raw_transaction_id,
+                            second_raw_transaction_id, confidence, evidence_json, enrichment_version
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
+    def replace_unusual_spend_candidates(
+        self, candidates: list[UnusualSpendCandidate]
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.execute("DELETE FROM unusual_spend_candidates")
+                rows = [
+                    [
+                        uuid4(),
+                        candidate.raw_transaction_id,
+                        candidate.confidence,
+                        json.dumps(candidate.evidence, sort_keys=True),
+                        "v1",
+                    ]
+                    for candidate in candidates
+                ]
+                if rows:
+                    connection.executemany(
+                        """
+                        INSERT INTO unusual_spend_candidates (
+                            unusual_candidate_id, raw_transaction_id, confidence,
+                            evidence_json, enrichment_version
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
     def _write(self, query: str, parameters: list[object]) -> None:
-        with database_write_lock(self.database_path), duckdb.connect(
-            str(self.database_path)
-        ) as connection:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
             connection.execute("BEGIN TRANSACTION")
             try:
                 connection.execute(query, parameters)
