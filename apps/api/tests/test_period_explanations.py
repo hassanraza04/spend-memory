@@ -59,6 +59,18 @@ def test_period_explanation_contributions_and_remainder_sum_exactly() -> None:
     assert explanation.after_net_amount_minor == -4699
     assert explanation.difference_net_amount_minor == -700
     assert explanation.contribution_total_minor + explanation.remainder_minor == -700
+    assert [(item.label, item.amount_minor) for item in explanation.contributions] == [
+        ("MetroMart", -500),
+        ("cash withdrawal", -200),
+    ]
+    assert explanation.contributions[0].before_raw_transaction_ids == (UUID(int=1),)
+    assert explanation.contributions[0].after_raw_transaction_ids == (UUID(int=3),)
+    assert explanation.before_raw_transaction_ids == (UUID(int=1), UUID(int=2))
+    assert explanation.after_raw_transaction_ids == (
+        UUID(int=3),
+        UUID(int=4),
+        UUID(int=5),
+    )
     assert "700 minor units more out" in explanation.text
     assert "MetroMart accounted for 500 minor units" in explanation.text
 
@@ -95,6 +107,7 @@ def test_period_explanation_uses_group_precedence_without_double_counting() -> N
 
     assert explanation.contribution_total_minor == -500
     assert explanation.remainder_minor == 0
+    assert [item.amount_minor for item in explanation.contributions] == [-200, -200, -100]
     assert explanation.text.count("StreamBox subscription") == 1
     assert explanation.text.count("MetroMart") == 1
     assert explanation.text.count("Transport") == 1
@@ -145,6 +158,7 @@ def test_period_explanation_limits_contributors_and_reconciles_remainder() -> No
     assert explanation.difference_net_amount_minor == -1000
     assert explanation.contribution_total_minor == -900
     assert explanation.remainder_minor == -100
+    assert [item.amount_minor for item in explanation.contributions] == [-400, -300, -200]
     assert "Alpha accounted for 400 minor units" in explanation.text
     assert "Bravo accounted for 300 minor units" in explanation.text
     assert "Charlie accounted for 200 minor units" in explanation.text

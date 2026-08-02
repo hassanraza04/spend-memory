@@ -299,41 +299,57 @@ class EnrichmentRepository:
         ):
             connection.execute("BEGIN TRANSACTION")
             try:
+                connection.execute("DELETE FROM recurring_candidate_members")
                 connection.execute("DELETE FROM recurring_candidates")
-                rows = [
-                    [
-                        uuid4(),
-                        candidate.candidate_key,
-                        candidate.account_identity,
-                        candidate.merchant_id,
-                        candidate.normalized_descriptor,
-                        candidate.currency,
-                        candidate.direction,
-                        candidate.cadence,
-                        candidate.first_transaction_date,
-                        candidate.last_transaction_date,
-                        candidate.amount_min_minor,
-                        candidate.amount_max_minor,
-                        candidate.expected_next_start,
-                        candidate.expected_next_end,
-                        candidate.confidence,
-                        json.dumps(candidate.evidence, sort_keys=True),
-                        "v1",
-                    ]
-                    for candidate in candidates
-                ]
-                if rows:
+                candidate_rows: list[list[object]] = []
+                member_rows: list[list[object]] = []
+                for candidate in candidates:
+                    recurring_candidate_id = uuid4()
+                    candidate_rows.append(
+                        [
+                            recurring_candidate_id,
+                            candidate.candidate_key,
+                            candidate.account_identity,
+                            candidate.merchant_id,
+                            candidate.normalized_descriptor,
+                            candidate.currency,
+                            candidate.direction,
+                            candidate.cadence,
+                            candidate.first_transaction_date,
+                            candidate.last_transaction_date,
+                            candidate.amount_min_minor,
+                            candidate.amount_max_minor,
+                            candidate.expected_next_start,
+                            candidate.expected_next_end,
+                            candidate.confidence,
+                            json.dumps(candidate.evidence, sort_keys=True),
+                            "v1",
+                        ]
+                    )
+                    member_rows.extend(
+                        [recurring_candidate_id, raw_transaction_id]
+                        for raw_transaction_id in candidate.raw_transaction_ids
+                    )
+                if candidate_rows:
                     connection.executemany(
-                    """
-                    INSERT INTO recurring_candidates (
-                        recurring_candidate_id, candidate_key, account_identity, merchant_id,
-                        normalized_descriptor, currency, direction, cadence,
-                        first_transaction_date, last_transaction_date, amount_min_minor,
-                        amount_max_minor, expected_next_start, expected_next_end, confidence,
-                        evidence_json, status, enrichment_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
-                    """,
-                        rows,
+                        """
+                        INSERT INTO recurring_candidates (
+                            recurring_candidate_id, candidate_key, account_identity, merchant_id,
+                            normalized_descriptor, currency, direction, cadence,
+                            first_transaction_date, last_transaction_date, amount_min_minor,
+                            amount_max_minor, expected_next_start, expected_next_end, confidence,
+                            evidence_json, status, enrichment_version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
+                        """,
+                        candidate_rows,
+                    )
+                    connection.executemany(
+                        """
+                        INSERT INTO recurring_candidate_members (
+                            recurring_candidate_id, raw_transaction_id
+                        ) VALUES (?, ?)
+                        """,
+                        member_rows,
                     )
                 connection.execute("COMMIT")
             except BaseException:

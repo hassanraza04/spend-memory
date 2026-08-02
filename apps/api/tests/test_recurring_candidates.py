@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import duckdb
 import pytest
@@ -13,10 +13,15 @@ from spend_memory.enrichment.repository import EnrichmentRepository
 
 
 def _transaction(
-    transaction_date: str, amount_minor: int, description: str, *, direction: str = "debit"
+    transaction_date: str,
+    amount_minor: int,
+    description: str,
+    *,
+    direction: str = "debit",
+    raw_id: UUID | None = None,
 ) -> TrustedTransaction:
     return TrustedTransaction(
-        raw_transaction_id=uuid4(),
+        raw_transaction_id=raw_id or uuid4(),
         account_identity="synthetic-account",
         transaction_date=date.fromisoformat(transaction_date),
         description=description,
@@ -28,14 +33,12 @@ def _transaction(
 
 
 def test_monthly_candidate_explains_dates_amount_range_and_next_window() -> None:
-    result = detect_recurring_candidates(
-        [
-            _transaction("2026-01-02", 2999, "STREAMBOX MONTHLY"),
-            _transaction("2026-02-03", 2999, "STREAMBOX MONTHLY"),
-            _transaction("2026-03-02", 3099, "STREAMBOX MONTHLY"),
-        ],
-        matches_by_transaction_id={},
-    )
+    transactions = [
+        _transaction("2026-01-02", 2999, "STREAMBOX MONTHLY"),
+        _transaction("2026-02-03", 2999, "STREAMBOX MONTHLY"),
+        _transaction("2026-03-02", 3099, "STREAMBOX MONTHLY"),
+    ]
+    result = detect_recurring_candidates(transactions, matches_by_transaction_id={})
 
     assert result[0].cadence == "monthly"
     assert result[0].amount_min_minor == 2999
@@ -43,6 +46,10 @@ def test_monthly_candidate_explains_dates_amount_range_and_next_window() -> None
     assert result[0].expected_next_start.isoformat() == "2026-03-30"
     assert result[0].expected_next_end.isoformat() == "2026-04-05"
     assert result[0].evidence["transaction_dates"] == "2026-01-02,2026-02-03,2026-03-02"
+    assert result[0].raw_transaction_ids == tuple(
+        transaction.raw_transaction_id for transaction in transactions
+    )
+    assert result[0].evidence["amount_tolerance_basis_points"] == 1000
 
 
 @pytest.mark.parametrize(
@@ -82,6 +89,25 @@ def test_amount_tolerance_allows_ten_percent_and_rejects_more() -> None:
 
     assert len(accepted) == 1
     assert rejected == []
+
+
+def test_amount_tolerance_uses_an_exact_integer_ratio() -> None:
+    assert detect_recurring_candidates(
+        [
+            _transaction("2026-01-02", 14, "TINY PLAN"),
+            _transaction("2026-02-02", 15, "TINY PLAN"),
+            _transaction("2026-03-02", 14, "TINY PLAN"),
+        ],
+        matches_by_transaction_id={},
+    )
+    assert detect_recurring_candidates(
+        [
+            _transaction("2026-01-02", 13, "TINY PLAN"),
+            _transaction("2026-02-02", 15, "TINY PLAN"),
+            _transaction("2026-03-02", 13, "TINY PLAN"),
+        ],
+        matches_by_transaction_id={},
+    ) == []
 
 
 def test_confirmed_merchant_groups_different_descriptors() -> None:
@@ -128,7 +154,19 @@ def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: P
         matches_by_transaction_id={},
     )
 
+    _store_raw_transactions(
+        repository,
+        [
+            *first[0].raw_transaction_ids,
+            *second[0].raw_transaction_ids,
+        ],
+    )
+
     repository.replace_recurring_candidates(first)
+    with duckdb.connect(str(repository.database_path), read_only=True) as connection:
+        assert connection.execute(
+            "SELECT raw_transaction_id FROM recurring_candidate_members ORDER BY raw_transaction_id"
+        ).fetchall() == [(raw_transaction_id,) for raw_transaction_id in sorted(first[0].raw_transaction_ids)]
     repository.replace_recurring_candidates(second)
     repository.replace_recurring_candidates([])
 
@@ -136,3 +174,42 @@ def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: P
         assert connection.execute(
             "SELECT candidate_key, status, amount_min_minor FROM recurring_candidates"
         ).fetchall() == []
+        assert connection.execute(
+            "SELECT count(*) FROM recurring_candidate_members"
+        ).fetchone() == (0,)
+
+
+def _store_raw_transactions(
+    repository: EnrichmentRepository, raw_transaction_ids: list[UUID]
+) -> None:
+    document_id = uuid4()
+    run_id = uuid4()
+    with duckdb.connect(str(repository.database_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO source_documents (
+                document_id, sha256_hex, original_filename, mime_type, byte_size,
+                storage_filename
+            ) VALUES (?, ?, 'test.csv', 'text/csv', 0, 'test.csv')
+            """,
+            [document_id, str(document_id)],
+        )
+        connection.execute(
+            """
+            INSERT INTO import_runs (run_id, document_id, parser_id, parser_version)
+            VALUES (?, ?, 'synthetic', 'v1')
+            """,
+            [run_id, document_id],
+        )
+        connection.executemany(
+            """
+            INSERT INTO raw_transactions (
+                raw_transaction_id, import_run_id, source_ordinal, date_text,
+                description_text, amount_text, extraction_method, extraction_confidence
+            ) VALUES (?, ?, ?, '2026-03-01', 'synthetic', '-100', 'synthetic', 1)
+            """,
+            [
+                [raw_transaction_id, run_id, ordinal]
+                for ordinal, raw_transaction_id in enumerate(raw_transaction_ids)
+            ],
+        )

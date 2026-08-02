@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from statistics import median
 from uuid import UUID
 
 from spend_memory.enrichment.models import (
@@ -152,19 +151,42 @@ def _unusual_candidate(
 ) -> UnusualSpendCandidate | None:
     if len(history) < 5:
         return None
-    median_amount = median(history)
-    mad = median([abs(value - median_amount) for value in history])
+    median_amount_twice = _median_twice(history)
+    deviations_twice = [
+        abs(2 * value - median_amount_twice) for value in history
+    ]
+    mad_twice = _exact_median(deviations_twice)
     observed_amount = abs(row.amount_minor)
-    if mad == 0 or observed_amount <= median_amount + 4 * mad:
+    if mad_twice == 0 or 2 * observed_amount <= median_amount_twice + 4 * mad_twice:
         return None
     return UnusualSpendCandidate(
         raw_transaction_id=row.raw_transaction_id,
         confidence=1.0,
         evidence={
             "group_key": f"{account_identity or ''}|{merchant_key}|{currency}",
-            "median_amount_minor": median_amount,
-            "mad_minor": mad,
+            "median_amount_minor_twice": median_amount_twice,
+            "mad_minor_twice": mad_twice,
             "observed_amount_minor": observed_amount,
             "sample_size": len(history),
         },
     )
+
+
+def _median_twice(values: list[int]) -> int:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return (
+        ordered[middle] * 2
+        if len(ordered) % 2
+        else ordered[middle - 1] + ordered[middle]
+    )
+
+
+def _exact_median(values: list[int]) -> int:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    total = ordered[middle - 1] + ordered[middle]
+    assert total % 2 == 0
+    return total // 2

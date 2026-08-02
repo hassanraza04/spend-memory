@@ -140,12 +140,43 @@ def test_mart_transactions_exposes_only_confirmed_merchant_and_category(
             """,
             [suggested_id, groceries.category_id],
         ).fetchall()
+        suggested_summary = connection.execute(
+            """
+            with suggested as (
+              select account_identity, currency, net_amount_minor
+              from analytics.mart_transactions
+              where raw_transaction_id = ?
+            ), other_uncategorized as (
+              select
+                count(*) as transaction_count,
+                coalesce(sum(transactions.net_amount_minor), 0)::bigint as net_amount_minor
+              from analytics.mart_transactions as transactions
+              join suggested using (account_identity, currency)
+              where transactions.category_id is null
+                and transactions.raw_transaction_id <> ?
+            )
+            select
+              summary.transaction_count,
+              summary.net_amount_minor,
+              other_uncategorized.transaction_count,
+              other_uncategorized.net_amount_minor,
+              suggested.net_amount_minor
+            from analytics.mart_category_summary as summary
+            join suggested using (account_identity, currency)
+            cross join other_uncategorized
+            where summary.category_id is null
+            """,
+            [suggested_id, suggested_id],
+        ).fetchone()
     assert set(rows) == {
         (transaction_id, merchant.merchant_id, groceries.category_id),
         (suggested_id, None, None),
     }
     assert (groceries.category_id, "Groceries") in category_labels
     assert (None, "uncategorized") in category_labels
+    summary_count, summary_net, other_count, other_net, suggested_net = suggested_summary
+    assert summary_count == other_count + 1
+    assert summary_net == other_net + suggested_net
 
 
 def test_dbt_builds_staging_models_from_active_imports(tmp_path: Path) -> None:

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from uuid import UUID
 
-from spend_memory.enrichment.models import PeriodExplanation, TrustedTransaction
+from spend_memory.enrichment.models import (
+    PeriodContribution,
+    PeriodExplanation,
+    TrustedTransaction,
+)
 
 MAX_CONTRIBUTIONS = 3
 
@@ -30,7 +35,7 @@ def explain_period_change(
     after_total = _net_total(after)
     difference = after_total - before_total
     contributions = _contributions(before, after)
-    contribution_total = sum(amount for _, amount in contributions)
+    contribution_total = sum(item.amount_minor for item in contributions)
     remainder = difference - contribution_total
     assert contribution_total + remainder == difference
     assert all(
@@ -44,12 +49,15 @@ def explain_period_change(
         )
     )
     return PeriodExplanation(
-        before_total,
-        after_total,
-        difference,
-        contribution_total,
-        remainder,
-        _text(difference, contributions, remainder),
+        before_net_amount_minor=before_total,
+        after_net_amount_minor=after_total,
+        difference_net_amount_minor=difference,
+        contribution_total_minor=contribution_total,
+        remainder_minor=remainder,
+        text=_text(difference, contributions, remainder),
+        contributions=tuple(contributions),
+        before_raw_transaction_ids=_source_ids(before),
+        after_raw_transaction_ids=_source_ids(after),
     )
 
 
@@ -84,27 +92,37 @@ def _net_total(rows: list[PeriodRow]) -> int:
 
 def _contributions(
     before: list[PeriodRow], after: list[PeriodRow]
-) -> list[tuple[str, int]]:
-    totals: dict[tuple[int, str], list[int]] = defaultdict(lambda: [0, 0])
+) -> list[PeriodContribution]:
+    grouped_rows: dict[tuple[int, str], tuple[list[PeriodRow], list[PeriodRow]]] = (
+        defaultdict(lambda: ([], []))
+    )
     for index, rows in enumerate((before, after)):
         for row in rows:
             priority, label = _group(row)
-            totals[(priority, label)][index] += _net_total([row])
+            grouped_rows[(priority, label)][index].append(row)
     changes = [
-        (priority, label, totals_after - totals_before)
-        for (priority, label), (totals_before, totals_after) in totals.items()
-        if totals_after != totals_before
+        (
+            priority,
+            PeriodContribution(
+                label=label,
+                amount_minor=_net_total(after_rows) - _net_total(before_rows),
+                before_raw_transaction_ids=_source_ids(before_rows),
+                after_raw_transaction_ids=_source_ids(after_rows),
+            ),
+        )
+        for (priority, label), (before_rows, after_rows) in grouped_rows.items()
+        if _net_total(after_rows) != _net_total(before_rows)
     ]
     changes.sort(
         key=lambda change: (
-            -abs(change[2]),
-            change[1].casefold(),
-            change[1],
+            -abs(change[1].amount_minor),
+            change[1].label.casefold(),
+            change[1].label,
             change[0],
-            change[2],
+            change[1].amount_minor,
         )
     )
-    return [(label, amount) for _, label, amount in changes[:MAX_CONTRIBUTIONS]]
+    return [contribution for _, contribution in changes[:MAX_CONTRIBUTIONS]]
 
 
 def _group(row: PeriodRow) -> tuple[int, str]:
@@ -117,7 +135,22 @@ def _group(row: PeriodRow) -> tuple[int, str]:
     return 3, row.transaction.normalized_description or row.transaction.description
 
 
-def _text(difference: int, contributions: list[tuple[str, int]], remainder: int) -> str:
+def _source_ids(rows: list[PeriodRow]) -> tuple[UUID, ...]:
+    return tuple(
+        row.transaction.raw_transaction_id
+        for row in sorted(
+            rows,
+            key=lambda item: (
+                item.transaction.transaction_date,
+                str(item.transaction.raw_transaction_id),
+            ),
+        )
+    )
+
+
+def _text(
+    difference: int, contributions: list[PeriodContribution], remainder: int
+) -> str:
     if difference == 0:
         return "Spending was unchanged from the previous period."
     direction = "more in" if difference > 0 else "more out"
@@ -125,8 +158,8 @@ def _text(difference: int, contributions: list[tuple[str, int]], remainder: int)
         f"Spending was {abs(difference)} minor units {direction} than the previous period."
     ]
     sentences.extend(
-        f"{label} accounted for {abs(amount)} minor units."
-        for label, amount in contributions
+        f"{item.label} accounted for {abs(item.amount_minor)} minor units."
+        for item in contributions
     )
     if remainder:
         sentences.append(f"Other activity accounted for {abs(remainder)} minor units.")

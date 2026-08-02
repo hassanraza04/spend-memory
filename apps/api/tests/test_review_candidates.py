@@ -120,8 +120,8 @@ def test_unusual_candidate_needs_history_and_uses_median_absolute_deviation() ->
     assert [candidate.raw_transaction_id for candidate in candidates] == [UUID(int=6)]
     assert candidates[0].evidence == {
         "group_key": "synthetic-account|descriptor:corner shop|AED",
-        "median_amount_minor": 100,
-        "mad_minor": 5,
+        "median_amount_minor_twice": 200,
+        "mad_minor_twice": 10,
         "observed_amount_minor": 500,
         "sample_size": 5,
     }
@@ -162,8 +162,8 @@ def test_unusual_evidence_preserves_even_history_median_and_mad() -> None:
 
     candidate = find_unusual_spend_candidates(rows, matches_by_transaction_id={})[0]
 
-    assert candidate.evidence["median_amount_minor"] == 102.5
-    assert candidate.evidence["mad_minor"] == 1.5
+    assert candidate.evidence["median_amount_minor_twice"] == 205
+    assert candidate.evidence["mad_minor_twice"] == 3
     assert candidate.evidence["sample_size"] == 6
 
 

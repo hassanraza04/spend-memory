@@ -141,9 +141,14 @@ def test_merchant_evaluation_keeps_held_out_variants_out_of_the_corpus() -> None
     evaluation = evaluate_merchant_matches(examples, held_out_merchant_ids={metromart_id})
 
     assert all(entry.merchant_id != metromart_id for entry in corpus)
-    assert evaluation.precision == 1.0
-    assert evaluation.coverage == 0.5
+    assert evaluation.precision == 0.0
+    assert evaluation.recall == 0.0
+    assert evaluation.coverage == 0.0
     assert evaluation.expected_calibration_error >= 0.0
+    assert evaluation.baseline_precision == 0.0
+    assert evaluation.baseline_recall == 0.0
+    assert evaluation.baseline_coverage == 0.0
+    assert evaluation.baseline_expected_calibration_error == 0.0
 
 
 def test_merchant_evaluation_exact_predictions_have_zero_calibration_error() -> None:

@@ -127,3 +127,13 @@ def test_suggested_merchant_does_not_assign_a_category(
     result = CategoryResolver(repository).resolve(_transaction(), _suggested_match(merchant))
 
     assert result == CategoryDecision(None, "Uncategorized", "none")
+
+
+def test_confirmed_merchant_without_an_assignment_stays_uncategorized(
+    repository: EnrichmentRepository,
+) -> None:
+    merchant = repository.create_merchant("MetroMart")
+
+    result = CategoryResolver(repository).resolve(_transaction(), _confirmed_match(merchant))
+
+    assert result == CategoryDecision(None, "Uncategorized", "none")

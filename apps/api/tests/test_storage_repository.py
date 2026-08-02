@@ -353,12 +353,14 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ("0001_import_storage",),
         ("0002_raw_amount_normalization",),
         ("0003_enrichment",),
+        ("0004_recurring_candidate_members",),
     ]
     assert {
         "source_documents",
         "import_runs",
         "raw_transactions",
         "import_errors",
+        "recurring_candidate_members",
     } <= tables
 
 

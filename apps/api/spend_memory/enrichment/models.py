@@ -41,6 +41,14 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class PeriodContribution:
+    label: str
+    amount_minor: int
+    before_raw_transaction_ids: tuple[UUID, ...]
+    after_raw_transaction_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
 class PeriodExplanation:
     before_net_amount_minor: int
     after_net_amount_minor: int
@@ -48,6 +56,9 @@ class PeriodExplanation:
     contribution_total_minor: int
     remainder_minor: int
     text: str
+    contributions: tuple[PeriodContribution, ...]
+    before_raw_transaction_ids: tuple[UUID, ...]
+    after_raw_transaction_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True)
@@ -65,6 +76,7 @@ class RecurringCandidate:
     amount_max_minor: int
     expected_next_start: date
     expected_next_end: date
+    raw_transaction_ids: tuple[UUID, ...]
     confidence: float
     evidence: dict[str, str | int | float]
 
@@ -103,6 +115,10 @@ class MerchantEvaluation:
     recall: float
     coverage: float
     expected_calibration_error: float
+    baseline_precision: float
+    baseline_recall: float
+    baseline_coverage: float
+    baseline_expected_calibration_error: float
 
 
 @dataclass(frozen=True)

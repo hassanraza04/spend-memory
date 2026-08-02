@@ -82,6 +82,7 @@ def detect_recurring_candidates(
                 amount_max_minor=max(amounts),
                 expected_next_start=rows[-1].transaction_date + timedelta(days=minimum),
                 expected_next_end=rows[-1].transaction_date + timedelta(days=maximum),
+                raw_transaction_ids=tuple(row.raw_transaction_id for row in rows),
                 confidence=1.0,
                 evidence={
                     "transaction_dates": ",".join(
@@ -89,7 +90,7 @@ def detect_recurring_candidates(
                     ),
                     "interval_days": ",".join(str(interval) for interval in intervals),
                     "observation_count": len(rows),
-                    "amount_tolerance_minor": max(1, round(max(amounts) * 0.1)),
+                    "amount_tolerance_basis_points": 1000,
                 },
             )
         )
@@ -97,4 +98,5 @@ def detect_recurring_candidates(
 
 
 def _amounts_are_consistent(values: list[int]) -> bool:
-    return max(values) - min(values) <= max(1, round(max(values) * 0.1))
+    difference = max(values) - min(values)
+    return difference <= 1 or difference * 10 <= max(values)

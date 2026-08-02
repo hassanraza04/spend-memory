@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from math import log, sqrt
 from uuid import UUID
@@ -93,10 +93,29 @@ def evaluate_merchant_matches(
 ) -> MerchantEvaluation:
     examples = list(examples)
     corpus = retrieval_corpus(examples, held_out_merchant_ids)
+    held_out_examples = [
+        example for example in examples if example[0] in held_out_merchant_ids
+    ]
+    metrics = _evaluation_metrics(
+        held_out_examples, lambda value: _resolve_corpus(value, corpus)
+    )
+    baseline = _evaluation_metrics(
+        held_out_examples, lambda value: _resolve_exact_alias(value, corpus)
+    )
+    return MerchantEvaluation(
+        *metrics,
+        *baseline,
+    )
+
+
+def _evaluation_metrics(
+    examples: list[tuple[UUID, str, str]],
+    resolve: Callable[[str], tuple[UUID, float] | None],
+) -> tuple[float, float, float, float]:
     correct = covered = predictions = 0
     buckets = [(0, 0, 0.0) for _ in range(5)]
     for merchant_id, _, descriptor in examples:
-        match = _resolve_corpus(normalize_descriptor(descriptor), corpus)
+        match = resolve(normalize_descriptor(descriptor))
         if match is None:
             continue
         predicted_id, confidence = match
@@ -116,12 +135,19 @@ def evaluate_merchant_matches(
         if examples
         else 0.0
     )
-    return MerchantEvaluation(
-        precision=correct / predictions if predictions else 0.0,
-        recall=correct / len(examples) if examples else 0.0,
-        coverage=covered / len(examples) if examples else 0.0,
-        expected_calibration_error=ece,
+    return (
+        correct / predictions if predictions else 0.0,
+        correct / len(examples) if examples else 0.0,
+        covered / len(examples) if examples else 0.0,
+        ece,
     )
+
+
+def _resolve_exact_alias(
+    normalized: str, corpus: list[MerchantCorpusEntry]
+) -> tuple[UUID, float] | None:
+    exact = next((entry for entry in corpus if entry.alias == normalized), None)
+    return None if exact is None else (exact.merchant_id, 1.0)
 
 
 def _resolve_corpus(
