@@ -297,9 +297,12 @@ class EnrichmentRepository:
             database_write_lock(self.database_path),
             duckdb.connect(str(self.database_path)) as connection,
         ):
+            # DuckDB checks foreign-key references against the transaction's
+            # original snapshot. Commit the child deletion before deleting its
+            # parents, otherwise the parent delete is rejected.
+            connection.execute("DELETE FROM recurring_candidate_members")
             connection.execute("BEGIN TRANSACTION")
             try:
-                connection.execute("DELETE FROM recurring_candidate_members")
                 connection.execute("DELETE FROM recurring_candidates")
                 candidate_rows: list[list[object]] = []
                 member_rows: list[list[object]] = []

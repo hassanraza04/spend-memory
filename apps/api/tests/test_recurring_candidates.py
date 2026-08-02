@@ -168,6 +168,13 @@ def test_replacing_recurring_candidates_keeps_only_review_candidates(tmp_path: P
             "SELECT raw_transaction_id FROM recurring_candidate_members ORDER BY raw_transaction_id"
         ).fetchall() == [(raw_transaction_id,) for raw_transaction_id in sorted(first[0].raw_transaction_ids)]
     repository.replace_recurring_candidates(second)
+    with duckdb.connect(str(repository.database_path), read_only=True) as connection:
+        assert connection.execute(
+            "SELECT candidate_key, status, amount_min_minor FROM recurring_candidates"
+        ).fetchall() == [(second[0].candidate_key, "candidate", 2000)]
+        assert connection.execute(
+            "SELECT raw_transaction_id FROM recurring_candidate_members ORDER BY raw_transaction_id"
+        ).fetchall() == [(raw_transaction_id,) for raw_transaction_id in sorted(second[0].raw_transaction_ids)]
     repository.replace_recurring_candidates([])
 
     with duckdb.connect(str(repository.database_path), read_only=True) as connection:
