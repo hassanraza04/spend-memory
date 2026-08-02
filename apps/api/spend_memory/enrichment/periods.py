@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from spend_memory.enrichment.models import PeriodExplanation, TrustedTransaction
 
+MAX_CONTRIBUTIONS = 3
+
 
 class PeriodExplanationError(ValueError):
     pass
@@ -88,14 +90,21 @@ def _contributions(
         for row in rows:
             priority, label = _group(row)
             totals[(priority, label)][index] += _net_total([row])
-    return sorted(
-        (
-            (label, totals_after - totals_before)
-            for (_, label), (totals_before, totals_after) in totals.items()
-            if totals_after != totals_before
-        ),
-        key=lambda contribution: (-abs(contribution[1]), contribution[0].casefold()),
+    changes = [
+        (priority, label, totals_after - totals_before)
+        for (priority, label), (totals_before, totals_after) in totals.items()
+        if totals_after != totals_before
+    ]
+    changes.sort(
+        key=lambda change: (
+            -abs(change[2]),
+            change[1].casefold(),
+            change[1],
+            change[0],
+            change[2],
+        )
     )
+    return [(label, amount) for _, label, amount in changes[:MAX_CONTRIBUTIONS]]
 
 
 def _group(row: PeriodRow) -> tuple[int, str]:
@@ -109,6 +118,8 @@ def _group(row: PeriodRow) -> tuple[int, str]:
 
 
 def _text(difference: int, contributions: list[tuple[str, int]], remainder: int) -> str:
+    if difference == 0:
+        return "Spending was unchanged from the previous period."
     direction = "more in" if difference > 0 else "more out"
     sentences = [
         f"Spending was {abs(difference)} minor units {direction} than the previous period."

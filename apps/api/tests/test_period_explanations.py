@@ -77,7 +77,6 @@ def test_period_explanation_uses_group_precedence_without_double_counting() -> N
             ),
             _row(2, "2026-01", 300, "METRO MART", merchant_name="MetroMart"),
             _row(3, "2026-01", 400, "FUEL STOP", category_label="Transport"),
-            _row(4, "2026-01", 500, "CASH WITHDRAWAL"),
         ],
         [
             _row(
@@ -91,15 +90,16 @@ def test_period_explanation_uses_group_precedence_without_double_counting() -> N
             ),
             _row(6, "2026-02", 500, "METRO MART", merchant_name="MetroMart"),
             _row(7, "2026-02", 600, "FUEL STOP", category_label="Transport"),
-            _row(8, "2026-02", 800, "CASH WITHDRAWAL"),
         ],
     )
 
-    assert explanation.contribution_total_minor + explanation.remainder_minor == -800
+    assert explanation.contribution_total_minor == -500
+    assert explanation.remainder_minor == 0
     assert explanation.text.count("StreamBox subscription") == 1
     assert explanation.text.count("MetroMart") == 1
     assert explanation.text.count("Transport") == 1
-    assert explanation.text.count("cash withdrawal") == 1
+    assert "StreamBox accounted for" not in explanation.text
+    assert "Entertainment accounted for" not in explanation.text
 
 
 def test_period_explanation_handles_credits_with_integer_minor_units() -> None:
@@ -113,6 +113,43 @@ def test_period_explanation_handles_credits_with_integer_minor_units() -> None:
     assert explanation.difference_net_amount_minor == 200
     assert explanation.contribution_total_minor + explanation.remainder_minor == 200
     assert "200 minor units more in" in explanation.text
+
+
+def test_period_explanation_uses_an_unchanged_template_for_zero_difference() -> None:
+    explanation = explain_period_change(
+        [_row(1, "2026-01", 100, "METRO MART", merchant_name="MetroMart")],
+        [_row(2, "2026-02", 100, "METRO MART", merchant_name="MetroMart")],
+    )
+
+    assert explanation.difference_net_amount_minor == 0
+    assert explanation.contribution_total_minor == 0
+    assert explanation.remainder_minor == 0
+    assert explanation.text == "Spending was unchanged from the previous period."
+
+
+def test_period_explanation_limits_contributors_and_reconciles_remainder() -> None:
+    before = [
+        _row(identifier, "2026-01", 100, label, merchant_name=label)
+        for identifier, label in enumerate(("Alpha", "Bravo", "Charlie", "Delta"), 1)
+    ]
+    after = [
+        _row(identifier, "2026-02", amount, label, merchant_name=label)
+        for identifier, (label, amount) in enumerate(
+            (("Alpha", 500), ("Bravo", 400), ("Charlie", 300), ("Delta", 200)),
+            5,
+        )
+    ]
+
+    explanation = explain_period_change(before, after)
+
+    assert explanation.difference_net_amount_minor == -1000
+    assert explanation.contribution_total_minor == -900
+    assert explanation.remainder_minor == -100
+    assert "Alpha accounted for 400 minor units" in explanation.text
+    assert "Bravo accounted for 300 minor units" in explanation.text
+    assert "Charlie accounted for 200 minor units" in explanation.text
+    assert "Delta accounted for" not in explanation.text
+    assert "Other activity accounted for 100 minor units" in explanation.text
 
 
 def test_period_explanation_rejects_empty_periods_mixed_currency_and_accounts() -> None:
