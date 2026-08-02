@@ -22,6 +22,8 @@ def find_duplicate_candidates(
         for second in transactions[index + 1 :]:
             if not _is_duplicate_pair(first, second, matches_by_transaction_id):
                 continue
+            merchant_key = _duplicate_identity(first, second, matches_by_transaction_id)
+            assert merchant_key is not None
             raw_transaction_ids = tuple(
                 sorted((first.raw_transaction_id, second.raw_transaction_id))
             )
@@ -37,7 +39,7 @@ def find_duplicate_candidates(
                         "date_distance_days": abs(
                             (first.transaction_date - second.transaction_date).days
                         ),
-                        "merchant_key": _merchant_key(first, matches_by_transaction_id),
+                        "merchant_key": merchant_key,
                     },
                 )
             )
@@ -52,7 +54,7 @@ def find_unusual_spend_candidates(
         list
     )
     for transaction in transactions:
-        if transaction.direction == "debit":
+        if transaction.direction == "debit" and transaction.account_identity is not None:
             groups[
                 (
                     transaction.account_identity,
@@ -82,13 +84,29 @@ def _is_duplicate_pair(
     matches_by_transaction_id: dict[UUID, MerchantMatch],
 ) -> bool:
     return (
-        first.account_identity == second.account_identity
+        first.account_identity is not None
+        and first.account_identity == second.account_identity
         and first.currency == second.currency
         and first.direction == second.direction
         and abs((first.transaction_date - second.transaction_date).days) <= 1
         and abs(first.amount_minor) == abs(second.amount_minor)
-        and _merchant_key(first, matches_by_transaction_id)
-        == _merchant_key(second, matches_by_transaction_id)
+        and _duplicate_identity(first, second, matches_by_transaction_id) is not None
+    )
+
+
+def _duplicate_identity(
+    first: TrustedTransaction,
+    second: TrustedTransaction,
+    matches_by_transaction_id: dict[UUID, MerchantMatch],
+) -> str | None:
+    first_match = _confirmed_merchant(first, matches_by_transaction_id)
+    second_match = _confirmed_merchant(second, matches_by_transaction_id)
+    if first_match is not None and second_match is not None:
+        return f"merchant:{first_match}" if first_match == second_match else None
+    return (
+        f"descriptor:{first.normalized_description}"
+        if first.normalized_description == second.normalized_description
+        else None
     )
 
 
@@ -96,14 +114,22 @@ def _merchant_key(
     transaction: TrustedTransaction,
     matches_by_transaction_id: dict[UUID, MerchantMatch],
 ) -> str:
-    match = matches_by_transaction_id.get(transaction.raw_transaction_id)
-    if (
-        match is not None
-        and match.status == "confirmed"
-        and match.merchant_id is not None
-    ):
-        return f"merchant:{match.merchant_id}"
+    merchant_id = _confirmed_merchant(transaction, matches_by_transaction_id)
+    if merchant_id is not None:
+        return f"merchant:{merchant_id}"
     return f"descriptor:{transaction.normalized_description}"
+
+
+def _confirmed_merchant(
+    transaction: TrustedTransaction,
+    matches_by_transaction_id: dict[UUID, MerchantMatch],
+) -> UUID | None:
+    match = matches_by_transaction_id.get(transaction.raw_transaction_id)
+    return (
+        match.merchant_id
+        if match is not None and match.status == "confirmed"
+        else None
+    )
 
 
 def _rows_by_date(
@@ -136,8 +162,8 @@ def _unusual_candidate(
         confidence=1.0,
         evidence={
             "group_key": f"{account_identity or ''}|{merchant_key}|{currency}",
-            "median_amount_minor": int(median_amount),
-            "mad_minor": int(mad),
+            "median_amount_minor": median_amount,
+            "mad_minor": mad,
             "observed_amount_minor": observed_amount,
             "sample_size": len(history),
         },

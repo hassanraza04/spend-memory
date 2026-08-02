@@ -19,12 +19,13 @@ def _transaction(
     amount_minor: int,
     description: str,
     *,
+    account_identity: str | None = "synthetic-account",
     direction: str = "debit",
     raw_id: UUID,
 ) -> TrustedTransaction:
     return TrustedTransaction(
         raw_transaction_id=raw_id,
-        account_identity="synthetic-account",
+        account_identity=account_identity,
         transaction_date=date.fromisoformat(transaction_date),
         description=description,
         normalized_description=normalize_descriptor(description),
@@ -66,6 +67,23 @@ def test_confirmed_merchant_matches_allow_different_descriptors() -> None:
     )
 
 
+def test_one_confirmed_merchant_uses_the_equal_normalized_descriptor() -> None:
+    transactions = [
+        _transaction("2026-03-12", 12500, "METRO MART", raw_id=UUID(int=1)),
+        _transaction("2026-03-12", 12500, "Metro Mart", raw_id=UUID(int=2)),
+    ]
+    matches = {
+        UUID(int=1): MerchantMatch(
+            UUID(int=100), "MetroMart", "confirmed", 1.0, "confirmed_alias", {}
+        )
+    }
+
+    assert find_duplicate_candidates(transactions, matches)[0].raw_transaction_ids == (
+        UUID(int=1),
+        UUID(int=2),
+    )
+
+
 def test_refund_reversal_and_legitimate_repeat_are_not_duplicate_candidates() -> None:
     rows = [
         _transaction("2026-03-12", 12500, "METRO MART", raw_id=UUID(int=1)),
@@ -73,6 +91,19 @@ def test_refund_reversal_and_legitimate_repeat_are_not_duplicate_candidates() ->
             "2026-03-12", 12500, "METRO MART", direction="credit", raw_id=UUID(int=2)
         ),
         _transaction("2026-03-20", 12500, "METRO MART", raw_id=UUID(int=3)),
+    ]
+
+    assert find_duplicate_candidates(rows, matches_by_transaction_id={}) == []
+
+
+def test_missing_account_identity_does_not_create_duplicate_candidates() -> None:
+    rows = [
+        _transaction(
+            "2026-03-12", 12500, "METRO MART", account_identity=None, raw_id=UUID(int=1)
+        ),
+        _transaction(
+            "2026-03-12", 12500, "METRO MART", account_identity=None, raw_id=UUID(int=2)
+        ),
     ]
 
     assert find_duplicate_candidates(rows, matches_by_transaction_id={}) == []
@@ -104,6 +135,36 @@ def test_zero_mad_does_not_create_an_unusual_spend_candidate() -> None:
     ] + [_transaction("2026-03-06", 500, "CORNER SHOP", raw_id=UUID(int=6))]
 
     assert find_unusual_spend_candidates(rows, matches_by_transaction_id={}) == []
+
+
+def test_missing_account_identity_does_not_pool_unusual_spend_history() -> None:
+    rows = [
+        _transaction(
+            f"2026-03-0{index}",
+            amount,
+            "CORNER SHOP",
+            account_identity=None,
+            raw_id=UUID(int=index),
+        )
+        for index, amount in enumerate((100, 110, 90, 105, 95, 500), start=1)
+    ]
+
+    assert find_unusual_spend_candidates(rows, matches_by_transaction_id={}) == []
+
+
+def test_unusual_evidence_preserves_even_history_median_and_mad() -> None:
+    rows = [
+        _transaction(
+            f"2026-03-0{index}", amount, "CORNER SHOP", raw_id=UUID(int=index)
+        )
+        for index, amount in enumerate((100, 101, 102, 103, 104, 105, 200), start=1)
+    ]
+
+    candidate = find_unusual_spend_candidates(rows, matches_by_transaction_id={})[0]
+
+    assert candidate.evidence["median_amount_minor"] == 102.5
+    assert candidate.evidence["mad_minor"] == 1.5
+    assert candidate.evidence["sample_size"] == 6
 
 
 def test_replacing_review_candidates_only_replaces_generated_rows(

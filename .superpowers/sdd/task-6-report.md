@@ -74,3 +74,29 @@ The Task 6 files are Ruff-clean. Those unrelated files were left untouched.
 
 - Candidate replacement assumes the calling refresh path supplies trusted transaction IDs that already exist in storage. The schema enforces this by design.
 - A one-day duplicate window can still surface legitimate repeated purchases as candidates when every rule matches. They are review signals only and are never applied automatically.
+
+## Review-finding follow-up
+
+### Red
+
+Added four boundary tests and ran `uv run pytest apps/api/tests/test_review_candidates.py -v`.
+
+Result: `4 failed, 6 passed` before the correction. The failures demonstrated that a one-sided confirmed merchant prevented the required descriptor fallback, null account identities paired and pooled history, and evidence truncated an even-history median and MAD.
+
+### Green
+
+Updated `apps/api/spend_memory/enrichment/review.py` to:
+
+- choose duplicate identity per pair: use a confirmed merchant identity only when both rows have one, otherwise require equal normalized descriptors;
+- require a non-null account identity for duplicate pairs and unusual-history groups; and
+- preserve exact `statistics.median` values in evidence, including fractional values from an even history.
+
+`uv run pytest apps/api/tests/test_review_candidates.py -v`
+
+Result: `10 passed`.
+
+`uv run ruff check apps/api/spend_memory/enrichment/review.py apps/api/tests/test_review_candidates.py`
+
+Result: passed.
+
+The remaining known limit is deliberate: a fully matching pair within one day is still only a review candidate, so legitimate repeat purchases are never changed automatically.
