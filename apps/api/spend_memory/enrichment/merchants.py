@@ -60,19 +60,19 @@ class MerchantResolver:
         weights = _tfidf_weights(documents)
         query = _weighted_trigrams(normalized, weights)
         currencies = self.repository.confirmed_merchant_currencies()
-        best: tuple[Merchant, str, float, bool] | None = None
+        best: tuple[Merchant, str, float, float, bool] | None = None
         for merchant, alias in candidates:
             text_score = _cosine(query, _weighted_trigrams(alias, weights))
             currency_compatible = (merchant.merchant_id, transaction.currency) in currencies
             score = min(1.0, text_score + (_CURRENCY_BONUS if currency_compatible else 0.0))
             if best is None or score > best[2]:
-                best = merchant, alias, score, currency_compatible
+                best = merchant, alias, score, text_score, currency_compatible
         assert best is not None
-        merchant, alias, score, currency_compatible = best
+        merchant, alias, score, text_score, currency_compatible = best
         evidence: dict[str, str | float] = {
             "normalized_descriptor": normalized,
             "winning_alias": alias,
-            "text_score": round(score - (_CURRENCY_BONUS if currency_compatible else 0.0), 4),
+            "text_score": text_score,
         }
         if currency_compatible:
             evidence["currency_signal"] = "compatible"
@@ -94,7 +94,7 @@ def evaluate_merchant_matches(
     examples = list(examples)
     corpus = retrieval_corpus(examples, held_out_merchant_ids)
     correct = covered = predictions = 0
-    buckets = [(0, 0) for _ in range(5)]
+    buckets = [(0, 0, 0.0) for _ in range(5)]
     for merchant_id, _, descriptor in examples:
         match = _resolve_corpus(normalize_descriptor(descriptor), corpus)
         if match is None:
@@ -105,12 +105,12 @@ def evaluate_merchant_matches(
         is_correct = predicted_id == merchant_id
         correct += is_correct
         index = min(4, int(confidence * 5))
-        total, accurate = buckets[index]
-        buckets[index] = total + 1, accurate + is_correct
+        total, accurate, confidence_total = buckets[index]
+        buckets[index] = total + 1, accurate + is_correct, confidence_total + confidence
     ece = (
         sum(
-            total / len(examples) * abs((accurate / total) - ((index + 0.5) / 5))
-            for index, (total, accurate) in enumerate(buckets)
+            total / len(examples) * abs((accurate / total) - (confidence_total / total))
+            for total, accurate, confidence_total in buckets
             if total
         )
         if examples

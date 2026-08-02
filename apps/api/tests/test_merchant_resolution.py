@@ -113,6 +113,20 @@ def test_currency_observation_only_bonuses_compatible_candidate(
     assert result.evidence["currency_signal"] == "compatible"
 
 
+def test_currency_bonus_cap_preserves_the_raw_text_score(
+    repository: EnrichmentRepository,
+) -> None:
+    descriptor = f"Merchant {'a' * 100}"
+    merchant = repository.create_merchant(descriptor)
+    repository.confirm_alias(descriptor, merchant.merchant_id)
+    repository.record_confirmed_merchant_currency(merchant.merchant_id, "AED")
+
+    result = MerchantResolver(repository).resolve(_transaction(descriptor[:-1]))
+
+    assert result.confidence == 1.0
+    assert 0.97 < result.evidence["text_score"] < 1.0
+
+
 def test_merchant_evaluation_keeps_held_out_variants_out_of_the_corpus() -> None:
     metromart_id = uuid4()
     cafe_id = uuid4()
@@ -130,3 +144,13 @@ def test_merchant_evaluation_keeps_held_out_variants_out_of_the_corpus() -> None
     assert evaluation.precision == 1.0
     assert evaluation.coverage == 0.5
     assert evaluation.expected_calibration_error >= 0.0
+
+
+def test_merchant_evaluation_exact_predictions_have_zero_calibration_error() -> None:
+    merchant_id = uuid4()
+
+    evaluation = evaluate_merchant_matches(
+        [(merchant_id, "MetroMart", "METRO MART")], held_out_merchant_ids=set()
+    )
+
+    assert evaluation.expected_calibration_error == 0.0
