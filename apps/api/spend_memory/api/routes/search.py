@@ -22,12 +22,22 @@ router = APIRouter()
 
 @router.get("/search", response_model=SearchResponse)
 def search_transactions_route(
-    query: Annotated[str, Query(min_length=1)],
     filters: Annotated[TransactionFilters, Depends()],
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+    query: Annotated[str, Query()] = "",
 ) -> SearchResponse:
+    if not query and filters.account is None and filters.counterparty is None:
+        raise ApiError(
+            "invalid_filter",
+            "Provide a search query or an account or counterparty filter.",
+            422,
+        )
     try:
-        scoped = filtered_rows(repository.list_search_rows(), query_from(filters, query))
+        scoped = filtered_rows(
+            repository.list_search_rows(),
+            query_from(filters, query),
+            include_all=not query,
+        )
     except RuntimeError:
         raise ApiError("trusted_records_unavailable", "Trusted records are not ready.", 503) from None
     lens = summarize_lens(row.transaction for row in scoped)

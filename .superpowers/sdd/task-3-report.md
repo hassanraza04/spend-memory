@@ -19,13 +19,17 @@ The requested API test files did not exist at the start, so the initial focused 
 
 ```text
 uv run pytest apps/api/tests/test_api_imports.py apps/api/tests/test_api_transactions.py apps/api/tests/test_api_search.py apps/api/tests/test_api_counterparties.py apps/api/tests/test_transaction_search.py apps/api/tests/test_counterparties.py apps/api/tests/test_counterparty_lenses.py -v
-18 passed
+20 passed
 
 uv run ruff check apps/api
 All checks passed!
 ```
 
 The API tests include a real synthetic CSV import and idempotent retry through the configured ingress, a trusted-mart transaction integration check, request validation, safe import errors, source evidence, structured account search, debit and credit AED lens flow, counterparty grouping, missing counterparties, duplicate IDs, and untrusted assignments.
+
+## Review correction
+
+The `GET /api/v1/search` text query is now optional when an `account` or `counterparty` scope is present. Filter-only requests use the existing full filtered scope before pagination, so their rows and lens reconcile. An empty unscoped search remains a safe `invalid_filter` response. The correction added route-level tests for a counterparty-only lens and an empty unscoped request.
 
 ## Concerns and follow-up
 

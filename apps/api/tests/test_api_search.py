@@ -48,3 +48,33 @@ def test_search_returns_structured_account_scope_and_pre_paging_aed_lens(tmp_pat
             "transaction_count": 2,
         }
     ]
+
+
+def test_search_allows_a_filter_only_counterparty_lens(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _Rows
+
+    response = TestClient(app).get("/api/v1/search?counterparty=Rina&limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["query"] == ""
+    assert len(response.json()["items"]) == 1
+    assert response.json()["lens"] == [
+        {
+            "currency": "AED",
+            "sent_minor": 1200,
+            "received_minor": 200,
+            "net_minor": -1000,
+            "transaction_count": 2,
+        }
+    ]
+
+
+def test_search_rejects_an_empty_unscoped_request(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _Rows
+
+    response = TestClient(app).get("/api/v1/search")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_filter"
