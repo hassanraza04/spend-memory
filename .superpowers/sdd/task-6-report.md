@@ -44,3 +44,13 @@
 Repair verification passed: `pnpm --dir apps/web test` (13 files, 33 tests), `pnpm --dir apps/web lint`, `pnpm --dir apps/web exec tsc --noEmit --incremental false`, and `git diff --check`.
 
 - Repair commit: `eeb2fdb fix lens lifecycle`
+
+## Final chart correction
+
+- The trend now renders one SVG per currency. Each chart uses that currency's server-provided minimum and maximum net values with a visible zero baseline. It does not combine currencies, convert them, or calculate a new financial total in the browser.
+- The default current-month start and end values are now written to the URL on first load.
+- Regression tests prove that `-1` and `-1,000,000` receive different visual positions and that the default date range is URL-backed.
+
+Final correction verification passed: `pnpm --dir apps/web test` (13 files, 35 tests), `pnpm --dir apps/web lint`, `pnpm --dir apps/web exec tsc --noEmit --incremental false`, and `git diff --check`.
+
+- Final correction commit: `e611786 scale monthly trend`
