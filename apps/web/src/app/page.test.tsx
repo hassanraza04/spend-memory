@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Page from "./page";
 
 describe("home page", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => window.history.replaceState({}, "", "/"));
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it("opens with the monthly question and the first-run choices", () => {
     render(<Page />);
@@ -12,6 +13,15 @@ describe("home page", () => {
     expect(screen.getByRole("heading", { name: "What happened this month?" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Import a statement" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Explore the synthetic demo" })).toBeTruthy();
+  });
+
+  it("persists the default current-month range in the URL", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 3));
+    render(<Page />);
+
+    expect(window.location.search).toContain("after=2026-08-01");
+    expect(window.location.search).toContain("before=2026-09-01");
   });
 
   it("keeps an empty filtered result in the record instead of returning to first run", async () => {

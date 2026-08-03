@@ -28,6 +28,11 @@ export default function Page() {
   const view = typeof window === "undefined" ? "this-month" : workspaceViewFrom(new URLSearchParams(window.location.search));
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get("after") && !params.get("before")) window.history.replaceState({}, "", toWorkspaceHref(state, view));
+  }, [state, view]);
+
+  useEffect(() => {
     let current = true;
     const scope = apiScope(state);
     const workspace = api.listTransactions({ limit: "1" });
