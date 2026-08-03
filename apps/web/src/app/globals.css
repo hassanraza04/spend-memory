@@ -156,6 +156,7 @@ h1 {
 .overview-heading, .ledger-heading, .panel-heading { display: flex; justify-content: space-between; gap: 1.5rem; align-items: flex-start; }
 .overview-heading h1, .view-intro h1, .coming-soon h1 { font-size: clamp(2.25rem, 5vw, 4.2rem); }
 .quiet-link { flex: 0 0 auto; padding: 0.45rem 0; color: var(--evidence); font-weight: 800; }
+.scope-note { margin-bottom: 0; color: var(--evidence); font-size: 0.86rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .lens-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin: 1.25rem 0; }
 .currency-flow, .activity-trend, .counterparty-editor, .source-panel { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-raised); }
 .currency-flow { padding: 1rem; }
@@ -164,7 +165,10 @@ h1 {
 .currency-flow dd span, .ledger-count, .empty-note, .counterparty-editor > p:not(.eyebrow), .evidence-list dt { color: var(--muted); }
 .activity-trend { padding: 1rem; }
 .activity-trend h2, .ledger-heading h2, .panel-heading h2, .counterparty-editor h2 { margin-bottom: 0.3rem; font-family: "Source Serif 4 Variable", Georgia, serif; font-size: 1.5rem; font-weight: 500; letter-spacing: -0.035em; }
-.activity-trend ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; padding: 0; margin: 1rem 0 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-control); list-style: none; background: var(--border); }
+.trend-chart { width: 100%; height: 120px; margin-top: 0.8rem; overflow: visible; }
+.trend-chart path { stroke: var(--border); stroke-width: 1; fill: none; }
+.trend-chart circle { fill: var(--evidence); stroke: var(--surface-raised); stroke-width: 2; }
+.activity-trend .trend-key { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; padding: 0; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-control); list-style: none; background: var(--border); }
 .activity-trend li { display: grid; gap: 0.25rem; min-height: 104px; padding: 0.8rem; background: var(--surface); font-variant-numeric: tabular-nums; }
 .activity-trend time, .activity-trend small { color: var(--muted); font-size: 0.78rem; }
 .activity-trend strong { color: var(--evidence); }

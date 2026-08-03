@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeWorkspaceState, toWorkspaceHref, workspaceStateFrom } from "./url-state";
+import { mergeWorkspaceState, toWorkspaceHref, withDefaultMonthRange, workspaceStateFrom } from "./url-state";
 
 describe("workspace URL state", () => {
   it("keeps active scope while switching views", () => {
@@ -18,5 +18,9 @@ describe("workspace URL state", () => {
       { after: "2026-08-01", before: "2026-09-01", query: "Rina", selected: "row-1" },
       { query: "Ali", selected: undefined },
     )).toEqual({ after: "2026-08-01", before: "2026-09-01", query: "Ali" });
+  });
+
+  it("uses the current calendar month when a range is absent", () => {
+    expect(withDefaultMonthRange({}, new Date(2026, 7, 3))).toEqual({ after: "2026-08-01", before: "2026-09-01" });
   });
 });

@@ -16,6 +16,7 @@ describe("MonthOverview", () => {
     );
 
     expect(screen.getByRole("heading", { name: "What happened this month?" })).toBeTruthy();
+    expect(screen.getByText("2026-08-01 to 2026-09-01")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Monthly activity trend" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Compare these periods" })).toBeTruthy();
   });

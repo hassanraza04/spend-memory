@@ -58,4 +58,12 @@ describe("TransactionLedger", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Group Rina lunch" }));
     expect(onToggleGrouping).toHaveBeenCalledWith(rows[0].transaction_id);
   });
+
+  it("does not open source evidence when Space toggles a grouping checkbox", () => {
+    const onSelect = vi.fn();
+    render(<TransactionLedger page={{ items: rows, total: 1, limit: 50, offset: 0 }} state={{}} onScopeChange={vi.fn()} onSelect={onSelect} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
+
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Group Rina lunch" }), { key: " " });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

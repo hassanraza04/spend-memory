@@ -91,6 +91,14 @@ export function mergeWorkspaceState(state: WorkspaceState, patch: Partial<Worksp
   return next;
 }
 
+export function withDefaultMonthRange(state: WorkspaceState, today = new Date()): WorkspaceState {
+  if (state.after || state.before) return state;
+  const date = (year: number, month: number, day: number) => `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  return { ...state, after: date(year, month, 1), before: date(year, month + 1, 1) };
+}
+
 export function workspaceViewFrom(params: URLSearchParams): WorkspaceView {
   const view = params.get("view");
   return views.includes(view as WorkspaceView) ? (view as WorkspaceView) : "this-month";

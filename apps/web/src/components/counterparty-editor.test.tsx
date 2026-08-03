@@ -26,4 +26,18 @@ describe("CounterpartyEditor", () => {
     expect(await screen.findByText("Exact alias confirmed.")).toBeTruthy();
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/counterparties/00000000-0000-0000-0000-000000000001", expect.anything());
   });
+
+  it("does not claim a failed group left nothing behind after its label was created", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ counterparty_id: "00000000-0000-0000-0000-000000000001", label: "Rina" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response("", { status: 500 })));
+    render(<CounterpartyEditor transactionIds={["00000000-0000-0000-0000-000000000007"]} descriptor="RINA A." />);
+
+    fireEvent.change(screen.getByLabelText("Counterparty name"), { target: { value: "Rina" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and group" }));
+
+    expect(await screen.findByText("The label was created, but the selected entries were not grouped." )).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create and group" })).toBeNull();
+    expect(screen.queryByText("We could not save that group. Nothing was changed.")).toBeNull();
+  });
 });
