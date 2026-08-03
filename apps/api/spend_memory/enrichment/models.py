@@ -131,3 +131,18 @@ class Merchant:
 class Category:
     category_id: UUID
     category_label: str
+
+
+@dataclass(frozen=True)
+class Counterparty:
+    counterparty_id: UUID
+    label: str
+
+
+@dataclass(frozen=True)
+class CurrencyFlow:
+    currency: str
+    sent_minor: int
+    received_minor: int
+    net_minor: int
+    transaction_count: int
