@@ -159,6 +159,7 @@ Pydantic request and response models define all public fields. UUIDs and dates u
 | `PATCH /api/v1/transactions/{id}` | Confirm a transaction-level category or counterparty assignment. |
 | `GET /api/v1/merchants` | List and filter confirmed merchants and suggestions. |
 | `PATCH /api/v1/merchants/{id}` | Update a local merchant correction or category assignment. |
+| `GET /api/v1/categories` | List confirmed local categories and their currency-separated scoped summaries. |
 | `GET /api/v1/counterparties` | List local counterparties and their scoped summaries. |
 | `POST /api/v1/counterparties` | Create a local counterparty label. |
 | `PATCH /api/v1/counterparties/{id}` | Rename a counterparty or confirm an exact descriptor alias. |
