@@ -20,6 +20,11 @@ describe("Personal Record tokens", () => {
     expect(stylesheet).toContain('@import "@fontsource-variable/source-serif-4";');
   });
 
+  it("styles the selected section from its accessible state", () => {
+    expect(stylesheet).toContain('.section-strip a[aria-current="page"]');
+    expect(stylesheet).not.toContain(".section-strip a:first-child");
+  });
+
   it("keeps primary action text at WCAG AA contrast", () => {
     const action = luminance(token("action"));
     const ink = luminance(token("action-ink"));

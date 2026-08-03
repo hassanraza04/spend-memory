@@ -7,14 +7,34 @@ import { ApiClient, ApiClientError } from "../lib/api";
 type ImportState = "empty" | "loading" | "unsupported" | "partial" | "failed" | "ready" | "demo-loading" | "demo-ready" | "demo-blocked" | "demo-failed" | "clearing-demo" | "clear-failed";
 
 const api = new ApiClient();
+const demoWorkspaceKey = "spend-memory-demo-workspace";
 
 function supported(file: File): boolean {
   return /\.(csv|pdf)$/i.test(file.name) || ["text/csv", "application/pdf"].includes(file.type);
 }
 
+function demoWorkspaceIsMarked(): boolean {
+  try {
+    return window.localStorage?.getItem(demoWorkspaceKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function markDemoWorkspace(isDemo: boolean) {
+  try {
+    if (isDemo) window.localStorage?.setItem(demoWorkspaceKey, "true");
+    else window.localStorage?.removeItem(demoWorkspaceKey);
+  } catch {
+    // ponytail: keep the current-session safety gate when browser storage is unavailable.
+  }
+}
+
 export function FirstRun() {
   const input = useRef<HTMLInputElement>(null);
-  const [importState, setImportState] = useState<ImportState>("empty");
+  const [importState, setImportState] = useState<ImportState>(() => (
+    typeof window !== "undefined" && demoWorkspaceIsMarked() ? "demo-ready" : "empty"
+  ));
   const demoIsActive = ["demo-ready", "clearing-demo", "clear-failed"].includes(importState);
 
   async function importFile(file: File) {
@@ -35,6 +55,7 @@ export function FirstRun() {
     setImportState("demo-loading");
     try {
       await api.resetDemo();
+      markDemoWorkspace(true);
       setImportState("demo-ready");
     } catch (error) {
       setImportState(error instanceof ApiClientError && error.code === "non_demo_imports_present" ? "demo-blocked" : "demo-failed");
@@ -45,6 +66,7 @@ export function FirstRun() {
     setImportState("clearing-demo");
     try {
       await api.deleteLocalData();
+      markDemoWorkspace(false);
       setImportState("empty");
     } catch {
       setImportState("clear-failed");

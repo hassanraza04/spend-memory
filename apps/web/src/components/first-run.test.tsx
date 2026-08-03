@@ -1,9 +1,23 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FirstRun } from "./first-run";
 
 describe("FirstRun", () => {
+  const storage = new Map<string, string>();
+
+  beforeEach(() => {
+    storage.clear();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("explains that statements stay on this device", () => {
@@ -78,6 +92,7 @@ describe("FirstRun", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear demo data" }));
 
     expect(await screen.findByRole("button", { name: "Import a statement" })).toBeTruthy();
+    expect(storage.get("spend-memory-demo-workspace")).toBeUndefined();
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/v1/local-data",
       expect.objectContaining({ method: "DELETE" }),
@@ -119,6 +134,22 @@ describe("FirstRun", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear demo data" }));
 
     expect(await screen.findByText("We could not clear demo data. Your personal data was not changed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear demo data" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Import a statement" })).toBeNull();
+    expect(storage.get("spend-memory-demo-workspace")).toBe("true");
+  });
+
+  it("restores the demo safety gate after a reload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "reset" }), { status: 200 })));
+    const firstRender = render(<FirstRun />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore the synthetic demo" }));
+    expect(await screen.findByRole("button", { name: "Clear demo data" })).toBeTruthy();
+    expect(storage.get("spend-memory-demo-workspace")).toBe("true");
+    firstRender.unmount();
+
+    render(<FirstRun />);
+
     expect(screen.getByRole("button", { name: "Clear demo data" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Import a statement" })).toBeNull();
   });

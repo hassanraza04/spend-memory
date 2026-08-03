@@ -418,6 +418,17 @@ class ImportRepository:
         if declared_mime_type == "application/pdf":
             self._validate_pdf(document)
 
+    def mark_document_as_demo(self, document_id: UUID) -> None:
+        """Mark a synthetic document after it passes the normal safe ingress."""
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute(
+                "UPDATE source_documents SET is_demo = true WHERE document_id = ?",
+                [document_id],
+            )
+
     def _import_validated_document(
         self,
         *,

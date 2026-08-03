@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import duckdb
 from app.main import create_app
 from fastapi.testclient import TestClient
 from spend_memory.api.dependencies import (
@@ -35,6 +36,22 @@ def test_demo_reset_rejects_workspace_with_a_real_import(tmp_path: Path) -> None
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "non_demo_imports_present"
+
+
+def test_demo_reset_creates_marked_synthetic_records(tmp_path: Path) -> None:
+    database_path = tmp_path / "spend-memory.duckdb"
+    client = TestClient(create_app(database_path, tmp_path / "data"))
+
+    response = client.post("/api/v1/demo/reset")
+
+    assert response.status_code == 200
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        document = connection.execute(
+            "SELECT original_filename, is_demo FROM source_documents"
+        ).fetchone()
+        transaction_count = connection.execute("SELECT count(*) FROM raw_transactions").fetchone()
+    assert document == ("spend-memory-demo.csv", True)
+    assert transaction_count is not None and transaction_count[0] > 0
 
 
 def test_demo_reset_rejects_a_user_imported_canonical_csv(tmp_path: Path) -> None:
