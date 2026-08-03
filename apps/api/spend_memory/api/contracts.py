@@ -1,5 +1,6 @@
 from datetime import date
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -147,3 +148,100 @@ class CounterpartyLensResponse(BaseModel):
     counterparty_id: UUID
     label: str
     lens: tuple[CurrencyFlowResponse, ...]
+
+
+class MerchantEvidenceResponse(BaseModel):
+    transaction_id: UUID
+    merchant_id: UUID | None
+    merchant_name: str | None
+    status: str
+    confidence: float = Field(ge=0, le=1)
+    method: str
+    evidence: dict[str, str | int | float]
+
+
+class CategoryResponse(BaseModel):
+    category_id: UUID
+    label: str
+
+
+class RecurringCandidateResponse(BaseModel):
+    candidate_id: UUID
+    label: str
+    cadence: str
+    status: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: dict[str, str | int | float]
+    transaction_ids: tuple[UUID, ...]
+
+
+class ReviewCandidateResponse(BaseModel):
+    candidate_id: UUID
+    kind: Literal["duplicate", "unusual_spend"]
+    status: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: dict[str, str | int | float]
+    transaction_ids: tuple[UUID, ...]
+
+
+class MerchantCorrectionRequest(BaseModel):
+    descriptor: str | None = Field(default=None, min_length=1, max_length=500)
+    category_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def requires_a_change(self) -> "MerchantCorrectionRequest":
+        if self.descriptor is None and self.category_id is None:
+            raise ValueError("merchant_correction_required")
+        return self
+
+
+class TransactionCorrectionRequest(BaseModel):
+    category_id: UUID
+
+
+class MutationResponse(BaseModel):
+    status: Literal["saved"] = "saved"
+
+
+class ComparisonQuery(BaseModel):
+    before_start: date
+    before_end: date
+    after_start: date
+    after_end: date
+    account: str = Field(min_length=1, max_length=500)
+    currency: str = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def requires_non_overlapping_ranges(self) -> "ComparisonQuery":
+        if self.before_start >= self.before_end or self.after_start >= self.after_end:
+            raise ValueError("invalid_period_range")
+        if self.before_start < self.after_end and self.after_start < self.before_end:
+            raise ValueError("overlapping_period_ranges")
+        return self
+
+
+class PeriodContributionResponse(BaseModel):
+    label: str
+    amount_minor: int
+    before_transaction_ids: tuple[UUID, ...]
+    after_transaction_ids: tuple[UUID, ...]
+
+
+class PeriodExplanationResponse(BaseModel):
+    before_net_amount_minor: int
+    after_net_amount_minor: int
+    difference_net_amount_minor: int
+    contribution_total_minor: int
+    remainder_minor: int
+    text: str
+    contributions: tuple[PeriodContributionResponse, ...]
+    before_transaction_ids: tuple[UUID, ...]
+    after_transaction_ids: tuple[UUID, ...]
+
+
+class LocalDataConfirmation(BaseModel):
+    confirmation: Literal["DELETE LOCAL DATA"]
+
+
+class LocalDataResponse(BaseModel):
+    status: Literal["deleted", "reset"]
