@@ -359,7 +359,7 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ).fetchall()
         counterparty_constraints = connection.execute(
             """
-            SELECT table_name, constraint_type, constraint_text
+            SELECT table_name, constraint_type, constraint_column_names, constraint_text
             FROM duckdb_constraints()
             WHERE table_name IN (
                 'counterparties',
@@ -367,6 +367,19 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
                 'transaction_counterparty_assignments'
             )
               AND constraint_type IN ('PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY')
+            """
+        ).fetchall()
+        counterparty_columns = connection.execute(
+            """
+            SELECT table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = 'main'
+              AND table_name IN (
+                'counterparties',
+                'counterparty_aliases',
+                'transaction_counterparty_assignments'
+            )
+              AND (column_name LIKE '%\\_id' ESCAPE '\\' OR column_name LIKE '%\\_at' ESCAPE '\\')
             """
         ).fetchall()
         tables = {
@@ -425,36 +438,66 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ),
         ),
     ]
+    primary_key_columns = {
+        (table_name, column_name)
+        for table_name, constraint_type, columns, _ in counterparty_constraints
+        if constraint_type == "PRIMARY KEY"
+        for column_name in columns
+    }
     assert {
-        table_name
-        for table_name, constraint_type, _ in counterparty_constraints
+        table_name: tuple(columns)
+        for table_name, constraint_type, columns, _ in counterparty_constraints
         if constraint_type == "PRIMARY KEY"
     } == {
-        "counterparties",
-        "counterparty_aliases",
-        "transaction_counterparty_assignments",
+        "counterparties": ("counterparty_id",),
+        "counterparty_aliases": ("counterparty_alias_id",),
+        "transaction_counterparty_assignments": (
+            "transaction_counterparty_assignment_id",
+        ),
     }
-    assert any(
-        table_name == "counterparty_aliases"
-        and constraint_type == "UNIQUE"
-        and "normalized_descriptor" in constraint_text
-        for table_name, constraint_type, constraint_text in counterparty_constraints
-    )
-    assert any(
-        table_name == "counterparty_aliases"
-        and constraint_type == "FOREIGN KEY"
-        and "counterparties(counterparty_id)" in constraint_text
-        for table_name, constraint_type, constraint_text in counterparty_constraints
-    )
-    assert any(
-        table_name == "transaction_counterparty_assignments"
-        and constraint_type == "UNIQUE"
-        and "raw_transaction_id" in constraint_text
-        for table_name, constraint_type, constraint_text in counterparty_constraints
-    )
+    assert {
+        (table_name, column_name): data_type
+        for table_name, column_name, data_type in counterparty_columns
+        if (table_name, column_name) in primary_key_columns
+    } == {
+        ("counterparties", "counterparty_id"): "UUID",
+        ("counterparty_aliases", "counterparty_alias_id"): "UUID",
+        (
+            "transaction_counterparty_assignments",
+            "transaction_counterparty_assignment_id",
+        ): "UUID",
+    }
+    assert {
+        (table_name, column_name): data_type
+        for table_name, column_name, data_type in counterparty_columns
+        if column_name.endswith("_at")
+    } == {
+        ("counterparties", "created_at"): "TIMESTAMP WITH TIME ZONE",
+        ("counterparty_aliases", "confirmed_at"): "TIMESTAMP WITH TIME ZONE",
+        (
+            "transaction_counterparty_assignments",
+            "confirmed_at",
+        ): "TIMESTAMP WITH TIME ZONE",
+    }
+    assert {
+        (table_name, tuple(columns))
+        for table_name, constraint_type, columns, _ in counterparty_constraints
+        if constraint_type == "UNIQUE"
+    } == {
+        ("counterparty_aliases", ("normalized_descriptor",)),
+        ("transaction_counterparty_assignments", ("raw_transaction_id",)),
+    }
     assert {
         constraint_text
-        for table_name, constraint_type, constraint_text in counterparty_constraints
+        for table_name, constraint_type, _, constraint_text in counterparty_constraints
+        if table_name == "counterparty_aliases"
+        and constraint_type == "FOREIGN KEY"
+    } == {
+        "FOREIGN KEY (counterparty_id) REFERENCES counterparties(counterparty_id)",
+    }
+    assert {
+        constraint_text
+        for table_name, constraint_type, _, constraint_text in counterparty_constraints
         if table_name == "transaction_counterparty_assignments"
         and constraint_type == "FOREIGN KEY"
     } == {
