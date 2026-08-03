@@ -29,5 +29,12 @@ def delete_local_data(
     request: LocalDataConfirmation,
     service: Annotated[LocalDataService, Depends(get_local_data_service)],
 ) -> LocalDataResponse:
-    service.delete()
+    try:
+        service.delete()
+    except ValueError:
+        raise ApiError(
+            "unsafe_local_data_path",
+            "Local data could not be deleted safely.",
+            409,
+        ) from None
     return LocalDataResponse(status="deleted")

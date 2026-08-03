@@ -20,7 +20,7 @@ LOCAL_API_PORT = 8000
 
 def create_app(database_path: Path, data_directory: Path) -> FastAPI:
     app = FastAPI(title="Spend Memory API")
-    app.state.settings = LocalSettings(database_path, data_directory)
+    app.state.settings = LocalSettings(database_path, data_directory, data_directory.parent)
     app.include_router(legacy_router)
     app.include_router(router)
     app.add_exception_handler(ApiError, api_error_handler)

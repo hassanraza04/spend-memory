@@ -400,6 +400,7 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ("0004_recurring_candidate_members",),
         ("0005_recurring_candidate_generations",),
         ("0006_counterparties",),
+        ("0007_demo_imports",),
     ]
     assert {
         "source_documents",

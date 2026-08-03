@@ -9,10 +9,12 @@ from uuid import UUID, uuid4
 
 import duckdb
 
+from spend_memory.enrichment.counterparties import summarize_lens
 from spend_memory.enrichment.models import (
     Category,
     CategoryDecision,
     Counterparty,
+    CurrencyFlow,
     DuplicateCandidate,
     Merchant,
     MerchantMatch,
@@ -49,6 +51,14 @@ class RecurringEvidence:
     confidence: float
     evidence: dict[str, str | int | float]
     transaction_ids: tuple[UUID, ...]
+    expected_next_start: date
+    expected_next_end: date
+
+
+@dataclass(frozen=True)
+class CategorySummary:
+    category: Category
+    lens: tuple[CurrencyFlow, ...]
 
 
 @dataclass(frozen=True)
@@ -341,6 +351,21 @@ class EnrichmentRepository:
                 "SELECT category_id, category_label FROM categories ORDER BY category_label, category_id"
             ).fetchall()
         return [Category(*row) for row in rows]
+
+    def list_category_summaries(self, currency: str | None = None) -> list[CategorySummary]:
+        rows = self.list_search_rows()
+        return [
+            CategorySummary(
+                category,
+                summarize_lens(
+                    row.transaction
+                    for row in rows
+                    if row.category.category_id == category.category_id
+                    and (currency is None or row.transaction.currency == currency)
+                ),
+            )
+            for category in self.list_categories()
+        ]
 
     def assign_merchant_category(self, merchant_id: UUID, category_id: UUID) -> None:
         self._write(
@@ -789,7 +814,8 @@ class EnrichmentRepository:
                     """
                     SELECT candidates.recurring_candidate_id, candidates.normalized_descriptor,
                         candidates.cadence, candidates.status, candidates.confidence,
-                        candidates.evidence_json
+                        candidates.evidence_json, candidates.expected_next_start,
+                        candidates.expected_next_end
                     FROM recurring_candidates AS candidates
                     JOIN recurring_candidate_state AS state
                         ON state.active_generation_id = candidates.generation_id
@@ -815,9 +841,12 @@ class EnrichmentRepository:
         return [
             RecurringEvidence(
                 candidate_id, label, cadence, status, confidence, json.loads(evidence),
-                memberships[candidate_id],
+                memberships[candidate_id], expected_next_start, expected_next_end,
             )
-            for candidate_id, label, cadence, status, confidence, evidence in candidates
+            for (
+                candidate_id, label, cadence, status, confidence, evidence,
+                expected_next_start, expected_next_end,
+            ) in candidates
         ]
 
     def list_review_evidence(self) -> list[ReviewEvidence]:

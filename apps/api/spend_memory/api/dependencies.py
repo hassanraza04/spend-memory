@@ -20,15 +20,10 @@ from spend_memory.storage.repository import ImportRepository
 class LocalSettings:
     database_path: Path
     data_directory: Path
+    app_data_root: Path
 
 
 class LocalDataService:
-    _DEMO_PARSER_IDS = (
-        "canonical-csv",
-        "synthetic-aed-tabular-pdf",
-        "synthetic-pkr-compact-pdf",
-    )
-
     def __init__(self, settings: LocalSettings) -> None:
         self.settings = settings
 
@@ -36,29 +31,32 @@ class LocalDataService:
         if self.settings.database_path.exists():
             with duckdb.connect(str(self.settings.database_path), read_only=True) as connection:
                 non_demo_import = connection.execute(
-                    "SELECT 1 FROM import_runs WHERE parser_id NOT IN (?, ?, ?) LIMIT 1",
-                    self._DEMO_PARSER_IDS,
+                    "SELECT 1 FROM source_documents WHERE coalesce(is_demo, false) = false LIMIT 1",
                 ).fetchone()
             if non_demo_import is not None:
                 raise ValueError("non_demo_imports_present")
         self.delete()
 
     def delete(self) -> None:
-        data_directory = self.settings.data_directory.resolve()
-        if data_directory in {Path("/"), Path.home()}:
+        root = _safe_local_path(self.settings.app_data_root, self.settings.app_data_root)
+        data_directory = _safe_local_path(self.settings.data_directory, root)
+        database_path = _safe_local_path(self.settings.database_path, root)
+        if data_directory == root:
             raise ValueError("unsafe_local_data_path")
         if data_directory.exists():
             rmtree(data_directory)
-        self.settings.database_path.unlink(missing_ok=True)
-        self.settings.database_path.with_name(
-            f".{self.settings.database_path.name}.write.lock"
+        database_path.unlink(missing_ok=True)
+        database_path.with_name(
+            f".{database_path.name}.write.lock"
         ).unlink(missing_ok=True)
 
 
 def load_local_settings() -> LocalSettings:
+    data_directory = Path(environ.get("SPEND_MEMORY_DATA_DIRECTORY", "data"))
     return LocalSettings(
         Path(environ.get("DUCKDB_PATH", "spend-memory.duckdb")),
-        Path(environ.get("SPEND_MEMORY_DATA_DIRECTORY", "data")),
+        data_directory,
+        Path(environ.get("SPEND_MEMORY_APP_DATA_ROOT", data_directory.parent)),
     )
 
 
@@ -96,3 +94,21 @@ def get_local_data_service(
     settings: Annotated[LocalSettings, Depends(get_local_settings)],
 ) -> LocalDataService:
     return LocalDataService(settings)
+
+
+def _safe_local_path(path: Path, root: Path) -> Path:
+    raw_path = path.absolute()
+    raw_root = root.absolute()
+    resolved_root = raw_root.resolve()
+    resolved_path = raw_path.resolve()
+    if (
+        raw_root != resolved_root
+        or raw_path != resolved_path
+        or resolved_root in {Path("/"), Path.home()}
+    ):
+        raise ValueError("unsafe_local_data_path")
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError:
+        raise ValueError("unsafe_local_data_path") from None
+    return resolved_path

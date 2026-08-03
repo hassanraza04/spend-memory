@@ -9,7 +9,7 @@ def test_local_settings_default_to_local_paths(monkeypatch) -> None:
     monkeypatch.delenv("SPEND_MEMORY_DATA_DIRECTORY", raising=False)
 
     assert load_local_settings() == LocalSettings(
-        Path("spend-memory.duckdb"), Path("data")
+        Path("spend-memory.duckdb"), Path("data"), Path(".")
     )
 
 
@@ -18,7 +18,7 @@ def test_local_settings_preserve_the_compose_data_volume(monkeypatch) -> None:
     monkeypatch.setenv("SPEND_MEMORY_DATA_DIRECTORY", "/data/documents")
 
     assert load_local_settings() == LocalSettings(
-        Path("/data/spend-memory.duckdb"), Path("/data/documents")
+        Path("/data/spend-memory.duckdb"), Path("/data/documents"), Path("/data")
     )
 
 

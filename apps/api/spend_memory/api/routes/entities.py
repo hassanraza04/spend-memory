@@ -4,12 +4,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from spend_memory.api.contracts import (
+    CategoryQuery,
     CategoryResponse,
+    CurrencyFlowResponse,
+    EntityQuery,
     MerchantCorrectionRequest,
     MerchantEvidenceResponse,
     MutationResponse,
     Page,
-    PageRequest,
     RecurringCandidateResponse,
     ReviewCandidateResponse,
     TransactionCorrectionRequest,
@@ -21,7 +23,7 @@ from spend_memory.enrichment.repository import EnrichmentRepository
 router = APIRouter()
 
 
-def _page(items: list[object], request: PageRequest) -> Page[object]:
+def _page(items: list[object], request: EntityQuery) -> Page[object]:
     return Page(
         items=items[request.offset : request.offset + request.limit],
         limit=request.limit,
@@ -30,55 +32,72 @@ def _page(items: list[object], request: PageRequest) -> Page[object]:
     )
 
 
+def _ordered(items: list[object], request: EntityQuery) -> list[object]:
+    if request.status is not None:
+        items = [item for item in items if getattr(item, "status", None) == request.status]
+    key = {
+        "label": lambda item: str(
+            getattr(item, "label", getattr(item, "merchant_name", ""))
+        ).casefold(),
+        "status": lambda item: str(getattr(item, "status", "")),
+        "confidence": lambda item: float(getattr(item, "confidence", 0)),
+    }[request.sort.value]
+    return sorted(items, key=key, reverse=request.order.value == "desc")
+
+
 @router.get("/merchants", response_model=Page[MerchantEvidenceResponse])
 def list_merchants(
-    request: Annotated[PageRequest, Depends()],
+    request: Annotated[EntityQuery, Depends()],
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
 ) -> Page[MerchantEvidenceResponse]:
     try:
-        return _page(
-            [MerchantEvidenceResponse(**item.__dict__) for item in repository.list_merchant_evidence()],
-            request,
-        )
+        return _page(_ordered([
+            MerchantEvidenceResponse(**item.__dict__) for item in repository.list_merchant_evidence()
+        ], request), request)
     except RuntimeError:
         raise ApiError("trusted_records_unavailable", "Trusted records are not ready.", 503) from None
 
 
 @router.get("/categories", response_model=Page[CategoryResponse])
 def list_categories(
-    request: Annotated[PageRequest, Depends()],
+    request: Annotated[CategoryQuery, Depends()],
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
 ) -> Page[CategoryResponse]:
-    return _page(
-        [CategoryResponse(category_id=item.category_id, label=item.category_label) for item in repository.list_categories()],
-        request,
-    )
+    try:
+        return _page(_ordered([
+            CategoryResponse(
+                category_id=item.category.category_id,
+                label=item.category.category_label,
+                lens=tuple(CurrencyFlowResponse(**flow.__dict__) for flow in item.lens),
+            )
+            for item in repository.list_category_summaries(request.currency)
+        ], request), request)
+    except RuntimeError:
+        raise ApiError("trusted_records_unavailable", "Trusted records are not ready.", 503) from None
 
 
 @router.get("/recurring", response_model=Page[RecurringCandidateResponse])
 def list_recurring(
-    request: Annotated[PageRequest, Depends()],
+    request: Annotated[EntityQuery, Depends()],
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
 ) -> Page[RecurringCandidateResponse]:
     try:
-        return _page(
-            [RecurringCandidateResponse(**item.__dict__) for item in repository.list_recurring_evidence()],
-            request,
-        )
+        return _page(_ordered([
+            RecurringCandidateResponse(**item.__dict__) for item in repository.list_recurring_evidence()
+        ], request), request)
     except RuntimeError:
         raise ApiError("trusted_records_unavailable", "Trusted records are not ready.", 503) from None
 
 
 @router.get("/review", response_model=Page[ReviewCandidateResponse])
 def list_review(
-    request: Annotated[PageRequest, Depends()],
+    request: Annotated[EntityQuery, Depends()],
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
 ) -> Page[ReviewCandidateResponse]:
     try:
-        return _page(
-            [ReviewCandidateResponse(**item.__dict__) for item in repository.list_review_evidence()],
-            request,
-        )
+        return _page(_ordered([
+            ReviewCandidateResponse(**item.__dict__) for item in repository.list_review_evidence()
+        ], request), request)
     except RuntimeError:
         raise ApiError("trusted_records_unavailable", "Trusted records are not ready.", 503) from None
 

@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ErrorDetail(BaseModel):
@@ -49,9 +49,32 @@ class SortOrder(StrEnum):
     descending = "desc"
 
 
+class EntitySort(StrEnum):
+    label = "label"
+    status = "status"
+    confidence = "confidence"
+
+
+class EntityStatus(StrEnum):
+    candidate = "candidate"
+    confirmed = "confirmed"
+    suggested = "suggested"
+    unresolved = "unresolved"
+
+
 class TransactionQuery(PageRequest):
     sort: TransactionSort = TransactionSort.date
     order: SortOrder = SortOrder.descending
+
+
+class EntityQuery(PageRequest):
+    sort: EntitySort = EntitySort.label
+    order: SortOrder = SortOrder.ascending
+    status: EntityStatus | None = None
+
+
+class CategoryQuery(EntityQuery):
+    currency: str | None = Field(default=None, min_length=1, max_length=12)
 
 
 class TransactionPath(BaseModel):
@@ -163,6 +186,7 @@ class MerchantEvidenceResponse(BaseModel):
 class CategoryResponse(BaseModel):
     category_id: UUID
     label: str
+    lens: tuple[CurrencyFlowResponse, ...]
 
 
 class RecurringCandidateResponse(BaseModel):
@@ -173,6 +197,8 @@ class RecurringCandidateResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence: dict[str, str | int | float]
     transaction_ids: tuple[UUID, ...]
+    expected_next_start: date
+    expected_next_end: date
 
 
 class ReviewCandidateResponse(BaseModel):
@@ -240,6 +266,7 @@ class PeriodExplanationResponse(BaseModel):
 
 
 class LocalDataConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     confirmation: Literal["DELETE LOCAL DATA"]
 
 
