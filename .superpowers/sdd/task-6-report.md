@@ -1,102 +1,34 @@
-# Task 6 report: review candidates
+# Task 6 report
 
-## Outcome
+## Changes
 
-Implemented local, deterministic review candidates only. The rules do not modify transaction, source-document, or canonical-money values. No external data, services, models, or dependencies were added.
+- Added the current-scope monthly overview, with display-only currency summaries, one server-provided activity trend, and a comparison link.
+- Added a semantic transaction ledger with search, direct filters, progressive date, amount, merchant, category, counterparty, and review filters, sorting, URL-backed selection, compact column presets, and keyboard row inspection.
+- Added source evidence inspection with Escape-to-close behavior.
+- Added explicit local counterparty grouping. People can choose multiple trusted rows, create a label, review server-returned currency-separated totals, and separately confirm an exact alias.
+- Added typed API client calls for transactions, search, workspace lens, and counterparty actions. No browser financial arithmetic or currency conversion was added.
+- Preserved Personal Record and Night Desk styling with compact editorial tables and narrow-screen layout rules.
 
-## Scope completed
+## TDD evidence
 
-- Added `find_duplicate_candidates` in `apps/api/spend_memory/enrichment/review.py`.
-  - Requires equal account, currency, direction, absolute integer amount, merchant/descriptor identity, and a maximum one-day date distance.
-  - Uses a confirmed merchant ID only when present and confirmed for both matching rows. Otherwise it uses the normalized descriptor.
-  - Sorts raw ID pairs and emits fixed `1.0` confidence only for complete evidence.
-- Added `find_unusual_spend_candidates` in the same module.
-  - Considers debit rows only and groups by account, currency, and confirmed merchant ID or normalized descriptor.
-  - Uses only values from strictly earlier transaction dates, requires five observations, and applies median plus median absolute deviation with integer money inputs.
-  - Emits no candidate for thin history or zero MAD, and records group key, median, MAD, observed amount, and sample size.
-- Added writer-locked replacement methods for the two generated candidate tables in `apps/api/spend_memory/enrichment/repository.py`. They delete and insert only generated candidate rows within one transaction. Foreign keys preserve raw transaction lineage.
-- Added local synthetic behavior and persistence tests in `apps/api/tests/test_review_candidates.py`.
-
-## TDD record
-
-### Red
-
-`uv run pytest apps/api/tests/test_review_candidates.py -v` initially failed at collection with `ModuleNotFoundError: No module named 'spend_memory.enrichment.review'`.
-
-The first implementation run then exposed the intended foreign-key boundary in persistence: a candidate cannot reference a raw transaction that was not stored. The test was updated to create synthetic source, import-run, and raw-transaction lineage before asserting persistence.
-
-### Green
-
-`uv run pytest apps/api/tests/test_review_candidates.py -v`
-
-Result: `6 passed`.
-
-Covered behavior:
-
-- same-day equal debit candidate and stable sorted raw IDs;
-- confirmed merchant identity across different normalized descriptors;
-- refunds, reversals, and later legitimate repeats excluded;
-- five earlier values with non-zero MAD detect the later large spend;
-- thin history and zero MAD produce no candidate;
-- persistence replaces only generated review rows and preserves foreign-key lineage.
+- The initial component suite failed because the requested components did not exist.
+- The URL-state test failed before `mergeWorkspaceState` was added.
+- The multi-row grouping test and the fuller filter test each failed before their small UI additions were written.
+- The saved counterparty lens display test failed before the editor rendered the API-returned flow.
 
 ## Verification
 
-- Focused review tests: `6 passed`.
-- Task-file Ruff check: passed.
-- Full project tests: `173 passed`; web test: `1 passed`.
-- Analytics verification: `make analytics-test`, `11 passed`.
-- `git diff --check`: passed.
+- `pnpm --dir apps/web test` passed: 13 files, 28 tests.
+- `pnpm --dir apps/web lint` passed. It emitted only the existing stale `baseline-browser-mapping` advisory.
+- `pnpm --dir apps/web exec tsc --noEmit --incremental false` passed. The default incremental command cannot update an existing unwritable `tsconfig.tsbuildinfo` file in this worktree.
+- `git diff --check` passed.
 
-`make lint` did not pass because of three pre-existing findings outside Task 6:
+## Ponytail review
 
-- `apps/api/spend_memory/enrichment/recurring.py`: import formatting and `zip` versus `itertools.pairwise`.
-- `apps/api/tests/test_recurring_candidates.py`: import formatting.
+- Used native tables, form controls, details, local storage, CSS, and the existing local API client. No UI, chart, or state dependency was added.
+- The trend is a server-provided timeline rather than a browser-calculated money chart.
 
-The Task 6 files are Ruff-clean. Those unrelated files were left untouched.
+## Commit and push
 
-## Files changed
-
-- `apps/api/spend_memory/enrichment/review.py` (new)
-- `apps/api/spend_memory/enrichment/repository.py`
-- `apps/api/tests/test_review_candidates.py` (new)
-- `.superpowers/sdd/task-6-report.md` (new)
-
-## Self-review
-
-- Source values remain immutable. The implementation only reads typed trusted rows and writes separate candidate records.
-- All monetary comparisons use integer minor units. `statistics.median` can return a float for an even-count history, but no monetary value is rounded or persisted as a computed total. The emitted median and MAD are integer for the applicable odd five-item minimum history.
-- Outputs and documentation use `candidate`; they make no allegation and never alter totals or visibility.
-- Matching is intentionally conservative. Equal amount alone is insufficient.
-- The implementation is standard-library only and creates no refresh orchestration, API/UI, search, or future work.
-
-## Concerns
-
-- Candidate replacement assumes the calling refresh path supplies trusted transaction IDs that already exist in storage. The schema enforces this by design.
-- A one-day duplicate window can still surface legitimate repeated purchases as candidates when every rule matches. They are review signals only and are never applied automatically.
-
-## Review-finding follow-up
-
-### Red
-
-Added four boundary tests and ran `uv run pytest apps/api/tests/test_review_candidates.py -v`.
-
-Result: `4 failed, 6 passed` before the correction. The failures demonstrated that a one-sided confirmed merchant prevented the required descriptor fallback, null account identities paired and pooled history, and evidence truncated an even-history median and MAD.
-
-### Green
-
-Updated `apps/api/spend_memory/enrichment/review.py` to:
-
-- choose duplicate identity per pair: use a confirmed merchant identity only when both rows have one, otherwise require equal normalized descriptors;
-- require a non-null account identity for duplicate pairs and unusual-history groups; and
-- preserve exact `statistics.median` values in evidence, including fractional values from an even history.
-
-`uv run pytest apps/api/tests/test_review_candidates.py -v`
-
-Result: `10 passed`.
-
-`uv run ruff check apps/api/spend_memory/enrichment/review.py apps/api/tests/test_review_candidates.py`
-
-Result: passed.
-
-The remaining known limit is deliberate: a fully matching pair within one day is still only a review candidate, so legitimate repeat purchases are never changed automatically.
+- Commit: `d0de68d build flexible lenses`
+- Pushed: `origin/feature/api-interface`
