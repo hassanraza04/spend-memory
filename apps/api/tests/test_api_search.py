@@ -78,3 +78,13 @@ def test_search_rejects_an_empty_unscoped_request(tmp_path: Path) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_filter"
+
+
+def test_search_rejects_a_whitespace_only_unscoped_request(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _Rows
+
+    response = TestClient(app).get("/api/v1/search?query=%20")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_filter"

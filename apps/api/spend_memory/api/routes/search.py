@@ -26,6 +26,7 @@ def search_transactions_route(
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
     query: Annotated[str, Query()] = "",
 ) -> SearchResponse:
+    query = query.strip()
     if not query and filters.account is None and filters.counterparty is None:
         raise ApiError(
             "invalid_filter",
