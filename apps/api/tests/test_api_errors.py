@@ -29,6 +29,19 @@ def test_unknown_route_uses_safe_error_envelope(tmp_path: Path) -> None:
     }
 
 
+def test_not_found_errors_preserve_safe_response_headers(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+
+    @app.get("/api/v1/not-found-header-probe")
+    def not_found_header_probe() -> None:
+        raise HTTPException(status_code=404, headers={"X-Request-Id": "local-test"})
+
+    response = TestClient(app).get("/api/v1/not-found-header-probe")
+
+    assert response.status_code == 404
+    assert response.headers["x-request-id"] == "local-test"
+
+
 def test_http_errors_preserve_safe_response_headers(tmp_path: Path) -> None:
     app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
 

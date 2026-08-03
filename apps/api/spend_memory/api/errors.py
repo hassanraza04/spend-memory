@@ -67,6 +67,7 @@ async def http_error_handler(_: Request, error: HTTPException) -> JSONResponse:
                 code="not_found",
                 message="The requested resource was not found.",
             ),
+            error.headers,
         )
     return _response(
         error.status_code,
