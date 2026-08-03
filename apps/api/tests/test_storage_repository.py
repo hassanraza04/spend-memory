@@ -357,6 +357,18 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ORDER BY table_name
             """
         ).fetchall()
+        counterparty_constraints = connection.execute(
+            """
+            SELECT table_name, constraint_type, constraint_text
+            FROM duckdb_constraints()
+            WHERE table_name IN (
+                'counterparties',
+                'counterparty_aliases',
+                'transaction_counterparty_assignments'
+            )
+              AND constraint_type IN ('PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY')
+            """
+        ).fetchall()
         tables = {
             row[0]
             for row in connection.execute(
@@ -374,6 +386,7 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ("0003_enrichment",),
         ("0004_recurring_candidate_members",),
         ("0005_recurring_candidate_generations",),
+        ("0006_counterparties",),
     ]
     assert {
         "source_documents",
@@ -383,6 +396,9 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         "recurring_candidate_members",
         "recurring_candidate_generations",
         "recurring_candidate_state",
+        "counterparties",
+        "counterparty_aliases",
+        "transaction_counterparty_assignments",
     } <= tables
     assert member_constraints == [
         ("FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",),
@@ -409,6 +425,42 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ),
         ),
     ]
+    assert {
+        table_name
+        for table_name, constraint_type, _ in counterparty_constraints
+        if constraint_type == "PRIMARY KEY"
+    } == {
+        "counterparties",
+        "counterparty_aliases",
+        "transaction_counterparty_assignments",
+    }
+    assert any(
+        table_name == "counterparty_aliases"
+        and constraint_type == "UNIQUE"
+        and "normalized_descriptor" in constraint_text
+        for table_name, constraint_type, constraint_text in counterparty_constraints
+    )
+    assert any(
+        table_name == "counterparty_aliases"
+        and constraint_type == "FOREIGN KEY"
+        and "counterparties(counterparty_id)" in constraint_text
+        for table_name, constraint_type, constraint_text in counterparty_constraints
+    )
+    assert any(
+        table_name == "transaction_counterparty_assignments"
+        and constraint_type == "UNIQUE"
+        and "raw_transaction_id" in constraint_text
+        for table_name, constraint_type, constraint_text in counterparty_constraints
+    )
+    assert {
+        constraint_text
+        for table_name, constraint_type, constraint_text in counterparty_constraints
+        if table_name == "transaction_counterparty_assignments"
+        and constraint_type == "FOREIGN KEY"
+    } == {
+        "FOREIGN KEY (counterparty_id) REFERENCES counterparties(counterparty_id)",
+        "FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",
+    }
 
 
 def test_failed_migration_rolls_back_schema_and_migration_ledger(
