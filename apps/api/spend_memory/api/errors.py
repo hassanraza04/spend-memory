@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -22,10 +22,13 @@ class ApiError(Exception):
         self.details = tuple(details)
 
 
-def _response(status_code: int, body: ErrorBody) -> JSONResponse:
+def _response(
+    status_code: int, body: ErrorBody, headers: Mapping[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(error=body).model_dump(mode="json"),
+        headers=headers,
     )
 
 
@@ -68,6 +71,7 @@ async def http_error_handler(_: Request, error: HTTPException) -> JSONResponse:
     return _response(
         error.status_code,
         ErrorBody(code="request_failed", message="The request could not be completed."),
+        error.headers,
     )
 
 

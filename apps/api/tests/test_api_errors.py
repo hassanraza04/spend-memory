@@ -11,6 +11,7 @@ from spend_memory.api.contracts import (
     TransactionQuery,
 )
 from spend_memory.api.errors import ApiError
+from starlette.exceptions import HTTPException
 
 
 def test_unknown_route_uses_safe_error_envelope(tmp_path: Path) -> None:
@@ -26,6 +27,29 @@ def test_unknown_route_uses_safe_error_envelope(tmp_path: Path) -> None:
             "details": [],
         }
     }
+
+
+def test_http_errors_preserve_safe_response_headers(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+
+    @app.get("/api/v1/header-probe")
+    def header_probe() -> None:
+        raise HTTPException(status_code=405, headers={"Allow": "GET"})
+
+    response = TestClient(app).get("/api/v1/header-probe")
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "GET"
+
+
+def test_openapi_declares_error_envelopes(tmp_path: Path) -> None:
+    schema = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data").openapi()
+    responses = schema["paths"]["/api/v1/health"]["get"]["responses"]
+
+    for status_code in ("404", "422", "500"):
+        assert responses[status_code]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorResponse"
+        }
 
 
 def test_domain_errors_use_the_stable_error_envelope(tmp_path: Path) -> None:
