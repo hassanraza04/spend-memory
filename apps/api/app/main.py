@@ -3,7 +3,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from spend_memory.api import router
+from spend_memory.api import legacy_router, router
 from spend_memory.api.dependencies import LocalSettings, load_local_settings
 from spend_memory.api.errors import (
     ApiError,
@@ -21,6 +21,7 @@ LOCAL_API_PORT = 8000
 def create_app(database_path: Path, data_directory: Path) -> FastAPI:
     app = FastAPI(title="Spend Memory API")
     app.state.settings = LocalSettings(database_path, data_directory)
+    app.include_router(legacy_router)
     app.include_router(router)
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)

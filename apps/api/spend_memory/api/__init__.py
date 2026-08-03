@@ -17,3 +17,13 @@ router = APIRouter(
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+legacy_router = APIRouter()
+legacy_router.add_api_route(
+    "/health",
+    health,
+    methods=["GET"],
+    response_model=HealthResponse,
+    include_in_schema=False,
+)
