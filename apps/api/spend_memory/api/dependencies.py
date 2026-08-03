@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from dataclasses import dataclass
 from os import environ
 from pathlib import Path
@@ -25,15 +24,8 @@ class LocalSettings:
 
 
 class LocalDataService:
-    def __init__(
-        self,
-        settings: LocalSettings,
-        ingestion_service_factory: Callable[[], IngestionService] | None = None,
-    ) -> None:
+    def __init__(self, settings: LocalSettings) -> None:
         self.settings = settings
-        self.ingestion_service_factory = ingestion_service_factory or (
-            lambda: get_ingestion_service(settings)
-        )
 
     def reset_demo(self) -> None:
         if self.settings.database_path.exists():
@@ -44,7 +36,7 @@ class LocalDataService:
             if non_demo_import is not None:
                 raise ValueError("non_demo_imports_present")
         self.delete()
-        service = self.ingestion_service_factory()
+        service = get_ingestion_service(self.settings)
         result = service.import_document(
             document=_DEMO_DOCUMENT,
             filename="spend-memory-demo.csv",
