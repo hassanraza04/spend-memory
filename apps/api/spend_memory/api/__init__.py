@@ -8,6 +8,7 @@ from spend_memory.api.routes.counterparties import router as counterparties_rout
 from spend_memory.api.routes.entities import router as entities_router
 from spend_memory.api.routes.exports import router as exports_router
 from spend_memory.api.routes.imports import router as imports_router
+from spend_memory.api.routes.lenses import router as lenses_router
 from spend_memory.api.routes.local_data import router as local_data_router
 from spend_memory.api.routes.search import router as search_router
 from spend_memory.api.routes.transactions import router as transactions_router
@@ -30,6 +31,7 @@ def health() -> HealthResponse:
 router.include_router(imports_router)
 router.include_router(transactions_router)
 router.include_router(search_router)
+router.include_router(lenses_router)
 router.include_router(counterparties_router)
 router.include_router(entities_router)
 router.include_router(comparison_router)

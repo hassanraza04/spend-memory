@@ -4,9 +4,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from spend_memory.api.contracts import (
+    CounterpartyAliasRequest,
     CounterpartyAssignmentRequest,
+    CounterpartyCreateRequest,
     CounterpartyLensResponse,
+    CounterpartyResponse,
     CurrencyFlowResponse,
+    MutationResponse,
 )
 from spend_memory.api.dependencies import get_enrichment_repository
 from spend_memory.api.errors import ApiError
@@ -14,6 +18,36 @@ from spend_memory.enrichment.counterparties import summarize_lens
 from spend_memory.enrichment.repository import EnrichmentRepository
 
 router = APIRouter()
+
+
+@router.post("/counterparties", response_model=CounterpartyResponse, status_code=201)
+def create_counterparty(
+    request: CounterpartyCreateRequest,
+    repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+) -> CounterpartyResponse:
+    try:
+        counterparty = repository.create_counterparty(request.label)
+    except ValueError:
+        raise ApiError("invalid_counterparty", "The counterparty label is not valid.", 422) from None
+    return CounterpartyResponse(
+        counterparty_id=counterparty.counterparty_id,
+        label=counterparty.label,
+    )
+
+
+@router.patch("/counterparties/{counterparty_id}", response_model=MutationResponse)
+def confirm_counterparty_alias(
+    counterparty_id: UUID,
+    request: CounterpartyAliasRequest,
+    repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+) -> MutationResponse:
+    if repository.get_counterparty(counterparty_id) is None:
+        raise ApiError("counterparty_not_found", "The counterparty was not found.", 404)
+    try:
+        repository.confirm_counterparty_alias(request.descriptor, counterparty_id)
+    except ValueError:
+        raise ApiError("invalid_alias", "The descriptor is not valid.", 422) from None
+    return MutationResponse()
 
 
 @router.post(

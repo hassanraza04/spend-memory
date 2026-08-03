@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ErrorDetail(BaseModel):
@@ -144,6 +144,15 @@ class CurrencyFlowResponse(BaseModel):
     transaction_count: int
 
 
+class TrendBucketResponse(CurrencyFlowResponse):
+    period_start: date
+
+
+class WorkspaceLensResponse(BaseModel):
+    lens: tuple[CurrencyFlowResponse, ...]
+    trend: tuple[TrendBucketResponse, ...]
+
+
 class SearchResponse(BaseModel):
     query: str
     items: list[TransactionResponse]
@@ -171,6 +180,39 @@ class CounterpartyLensResponse(BaseModel):
     counterparty_id: UUID
     label: str
     lens: tuple[CurrencyFlowResponse, ...]
+
+
+class CounterpartyResponse(BaseModel):
+    counterparty_id: UUID
+    label: str
+
+
+class CounterpartyCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=200)
+
+    @field_validator("label")
+    @classmethod
+    def strip_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label_required")
+        return value
+
+
+class CounterpartyAliasRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    descriptor: str = Field(min_length=1, max_length=500)
+
+    @field_validator("descriptor")
+    @classmethod
+    def strip_descriptor(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("descriptor_required")
+        return value
 
 
 class MerchantEvidenceResponse(BaseModel):

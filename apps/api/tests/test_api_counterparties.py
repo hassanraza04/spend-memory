@@ -12,6 +12,7 @@ class _Counterparties:
     def __init__(self) -> None:
         self.counterparty = Counterparty(UUID(int=9), "Rina")
         self.assigned: list[UUID] = []
+        self.aliases: list[tuple[str, UUID]] = []
 
     def get_counterparty(self, counterparty_id: UUID) -> Counterparty | None:
         return self.counterparty if counterparty_id == self.counterparty.counterparty_id else None
@@ -26,6 +27,13 @@ class _Counterparties:
             TrustedTransaction(UUID(int=1), "AED-001", date(2026, 1, 1), "Rina", "rina", "AED", 1200, "debit"),
             TrustedTransaction(UUID(int=2), "AED-001", date(2026, 1, 2), "Rina", "rina", "AED", 200, "credit"),
         ]
+
+    def create_counterparty(self, label: str) -> Counterparty:
+        self.counterparty = Counterparty(UUID(int=10), label)
+        return self.counterparty
+
+    def confirm_counterparty_alias(self, descriptor: str, counterparty_id: UUID) -> None:
+        self.aliases.append((descriptor, counterparty_id))
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -66,3 +74,26 @@ def test_counterparty_assignment_rejects_missing_counterparty_duplicate_or_untru
     assert missing.json()["error"]["code"] == "counterparty_not_found"
     assert duplicate.status_code == 422
     assert untrusted.json()["error"]["code"] == "untrusted_transaction"
+
+
+def test_counterparty_creation_and_alias_confirmation_are_explicit_actions(
+    tmp_path: Path,
+) -> None:
+    repository = _Counterparties()
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = lambda: repository
+    client = TestClient(app)
+
+    created = client.post("/api/v1/counterparties", json={"label": "Rina Ahmed"})
+    alias = client.patch(
+        "/api/v1/counterparties/00000000-0000-0000-0000-00000000000a",
+        json={"descriptor": "RINA A."},
+    )
+
+    assert created.status_code == 201
+    assert created.json() == {
+        "counterparty_id": "00000000-0000-0000-0000-00000000000a",
+        "label": "Rina Ahmed",
+    }
+    assert alias.status_code == 200
+    assert repository.aliases == [("RINA A.", UUID(int=10))]
