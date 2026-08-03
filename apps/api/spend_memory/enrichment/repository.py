@@ -9,6 +9,7 @@ import duckdb
 
 from spend_memory.enrichment.models import (
     Category,
+    CategoryDecision,
     Counterparty,
     DuplicateCandidate,
     Merchant,
@@ -18,6 +19,7 @@ from spend_memory.enrichment.models import (
     UnusualSpendCandidate,
 )
 from spend_memory.enrichment.normalization import normalize_descriptor
+from spend_memory.enrichment.search import SearchRow
 from spend_memory.storage.repository import apply_migrations, database_write_lock
 
 if TYPE_CHECKING:
@@ -152,6 +154,67 @@ class EnrichmentRepository:
                 currency,
                 amount_minor,
                 direction,
+            ) in rows
+        ]
+
+    def get_counterparty(self, counterparty_id: UUID) -> Counterparty | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                "SELECT counterparty_id, label FROM counterparties WHERE counterparty_id = ?",
+                [counterparty_id],
+            ).fetchone()
+        return None if row is None else Counterparty(*row)
+
+    def list_search_rows(self) -> list[SearchRow]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT transactions.raw_transaction_id, transactions.account_identity,
+                        transactions.transaction_date, transactions.description,
+                        transactions.currency, transactions.amount_minor,
+                        transactions.direction, transactions.category_id,
+                        coalesce(categories.category_label, 'uncategorized'),
+                        merchants.merchant_name,
+                        coalesce(annotations.resolution_status, 'unresolved'),
+                        transactions.original_filename, transactions.source_ordinal,
+                        transactions.source_page, transactions.source_row,
+                        transactions.source_text, transactions.extraction_confidence,
+                        counterparties.label
+                    FROM analytics.mart_transactions AS transactions
+                    LEFT JOIN categories ON transactions.category_id = categories.category_id
+                    LEFT JOIN merchants ON transactions.merchant_id = merchants.merchant_id
+                    LEFT JOIN transaction_merchant_annotations AS annotations
+                        ON transactions.raw_transaction_id = annotations.raw_transaction_id
+                    LEFT JOIN transaction_counterparty_assignments AS assignments
+                        ON transactions.raw_transaction_id = assignments.raw_transaction_id
+                    LEFT JOIN counterparties ON assignments.counterparty_id = counterparties.counterparty_id
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            SearchRow(
+                transaction=TrustedTransaction(
+                    raw_transaction_id, account_identity, transaction_date, description,
+                    normalize_descriptor(description), currency, amount_minor, direction,
+                ),
+                category=CategoryDecision(category_id, category_label, "confirmed" if category_id else "unavailable"),
+                merchant_name=merchant_name,
+                state=state,
+                source_document=source_document,
+                source_ordinal=source_ordinal,
+                source_page=source_page,
+                source_row=source_row,
+                source_text=source_text,
+                extraction_confidence=extraction_confidence,
+                counterparty_label=counterparty_label,
+            )
+            for (
+                raw_transaction_id, account_identity, transaction_date, description, currency,
+                amount_minor, direction, category_id, category_label, merchant_name, state,
+                source_document, source_ordinal, source_page, source_row, source_text,
+                extraction_confidence, counterparty_label,
             ) in rows
         ]
 

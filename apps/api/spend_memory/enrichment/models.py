@@ -99,10 +99,12 @@ class UnusualSpendCandidate:
 class SearchQuery:
     after: date | None = None
     before: date | None = None
+    account: str | None = None
     currency: str | None = None
     direction: str | None = None
     merchant: str | None = None
     category: str | None = None
+    counterparty: str | None = None
     amount_min_minor: int | None = None
     amount_max_minor: int | None = None
     state: str | None = None
