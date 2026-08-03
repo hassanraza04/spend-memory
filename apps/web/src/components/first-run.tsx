@@ -30,7 +30,7 @@ function markDemoWorkspace(isDemo: boolean) {
   }
 }
 
-export function FirstRun() {
+export function FirstRun({ onReady }: Readonly<{ onReady?: () => void }> = {}) {
   const input = useRef<HTMLInputElement>(null);
   const [importState, setImportState] = useState<ImportState>(() => (
     typeof window !== "undefined" && demoWorkspaceIsMarked() ? "demo-ready" : "empty"
@@ -46,6 +46,7 @@ export function FirstRun() {
     try {
       const result = await api.importStatement(file);
       setImportState(result.transaction_count === 0 ? "partial" : "ready");
+      if (result.transaction_count > 0) onReady?.();
     } catch {
       setImportState("failed");
     }
@@ -57,6 +58,7 @@ export function FirstRun() {
       await api.resetDemo();
       markDemoWorkspace(true);
       setImportState("demo-ready");
+      onReady?.();
     } catch (error) {
       setImportState(error instanceof ApiClientError && error.code === "non_demo_imports_present" ? "demo-blocked" : "demo-failed");
     }

@@ -83,6 +83,14 @@ export function toWorkspaceHref(state: WorkspaceState, view: WorkspaceView): str
   return `?${params.toString()}`;
 }
 
+export function mergeWorkspaceState(state: WorkspaceState, patch: Partial<WorkspaceState>): WorkspaceState {
+  const next = { ...state, ...patch };
+  for (const key of Object.keys(next) as (keyof WorkspaceState)[]) {
+    if (!next[key]) delete next[key];
+  }
+  return next;
+}
+
 export function workspaceViewFrom(params: URLSearchParams): WorkspaceView {
   const view = params.get("view");
   return views.includes(view as WorkspaceView) ? (view as WorkspaceView) : "this-month";
