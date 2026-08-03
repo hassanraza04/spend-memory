@@ -26,4 +26,16 @@ describe("ApiClient", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("uses the exact local-data confirmation when clearing demo records", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "deleted" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient().deleteLocalData();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/local-data",
+      expect.objectContaining({ method: "DELETE", body: JSON.stringify({ confirmation: "DELETE LOCAL DATA" }) }),
+    );
+  });
 });

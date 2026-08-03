@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 
-import { ApiClient } from "../lib/api";
+import { ApiClient, ApiClientError } from "../lib/api";
 
-type ImportState = "empty" | "loading" | "unsupported" | "partial" | "failed" | "ready" | "demo-loading" | "demo-ready";
+type ImportState = "empty" | "loading" | "unsupported" | "partial" | "failed" | "ready" | "demo-loading" | "demo-ready" | "demo-blocked" | "demo-failed" | "clearing-demo" | "clear-failed";
 
 const api = new ApiClient();
 
@@ -15,6 +15,7 @@ function supported(file: File): boolean {
 export function FirstRun() {
   const input = useRef<HTMLInputElement>(null);
   const [importState, setImportState] = useState<ImportState>("empty");
+  const demoIsActive = ["demo-ready", "clearing-demo", "clear-failed"].includes(importState);
 
   async function importFile(file: File) {
     if (!supported(file)) {
@@ -35,8 +36,18 @@ export function FirstRun() {
     try {
       await api.resetDemo();
       setImportState("demo-ready");
+    } catch (error) {
+      setImportState(error instanceof ApiClientError && error.code === "non_demo_imports_present" ? "demo-blocked" : "demo-failed");
+    }
+  }
+
+  async function clearDemo() {
+    setImportState("clearing-demo");
+    try {
+      await api.deleteLocalData();
+      setImportState("empty");
     } catch {
-      setImportState("failed");
+      setImportState("clear-failed");
     }
   }
 
@@ -51,28 +62,36 @@ export function FirstRun() {
           <p className="choice-number">01</p>
           <h2>Bring in a statement</h2>
           <p>Your statements stay on this device.</p>
-          <button className="button primary" type="button" onClick={() => input.current?.click()}>
-            Import a statement
-          </button>
-          <input
-            ref={input}
-            className="visually-hidden"
-            id="statement-file"
-            type="file"
-            accept=".csv,.pdf,text/csv,application/pdf"
-            aria-label="Choose a CSV or PDF"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importFile(file);
-              event.currentTarget.value = "";
-            }}
-          />
+          {demoIsActive ? (
+            <button className="button primary" type="button" onClick={() => void clearDemo()} disabled={importState === "clearing-demo"}>
+              Clear demo data
+            </button>
+          ) : (
+            <>
+              <button className="button primary" type="button" onClick={() => input.current?.click()}>
+                Import a statement
+              </button>
+              <input
+                ref={input}
+                className="visually-hidden"
+                id="statement-file"
+                type="file"
+                accept=".csv,.pdf,text/csv,application/pdf"
+                aria-label="Choose a CSV or PDF"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importFile(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </>
+          )}
         </article>
         <article className="start-choice">
           <p className="choice-number">02</p>
           <h2>See how it feels</h2>
           <p>Explore synthetic demo data. It is clearly labelled and never mixes with your own records.</p>
-          <button className="button secondary" type="button" onClick={() => void startDemo()} disabled={importState === "demo-loading"}>
+          <button className="button secondary" type="button" onClick={() => void startDemo()} disabled={importState === "demo-loading" || importState === "demo-ready" || importState === "clearing-demo"}>
             Explore the synthetic demo
           </button>
         </article>
@@ -86,6 +105,10 @@ export function FirstRun() {
         {importState === "ready" && "Your record is ready to review."}
         {importState === "demo-loading" && "Preparing the synthetic demo."}
         {importState === "demo-ready" && "Synthetic demo data is ready. Clear it before importing personal data."}
+        {importState === "demo-blocked" && "The demo cannot replace your imported records."}
+        {importState === "demo-failed" && "We could not prepare the synthetic demo. Try again."}
+        {importState === "clearing-demo" && "Clearing synthetic demo data."}
+        {importState === "clear-failed" && "We could not clear demo data. Your personal data was not changed."}
       </p>
     </section>
   );

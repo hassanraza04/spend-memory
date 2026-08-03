@@ -63,4 +63,63 @@ describe("FirstRun", () => {
 
     expect(await screen.findByText("We could not import that statement. Try another supported file.")).toBeTruthy();
   });
+
+  it("requires demo data to be cleared before a personal import", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "reset" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "deleted" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<FirstRun />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore the synthetic demo" }));
+
+    expect(await screen.findByRole("button", { name: "Clear demo data" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Import a statement" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear demo data" }));
+
+    expect(await screen.findByRole("button", { name: "Import a statement" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/local-data",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("explains a blocked demo reset without using import failure copy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "non_demo_imports_present",
+              message: "Demo reset is unavailable while local imports are present.",
+            },
+          }),
+          { status: 409 },
+        ),
+      ),
+    );
+    render(<FirstRun />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore the synthetic demo" }));
+
+    expect(await screen.findByText("The demo cannot replace your imported records.")).toBeTruthy();
+    expect(screen.queryByText("We could not import that statement. Try another supported file.")).toBeNull();
+  });
+
+  it("keeps personal import unavailable when clearing demo data fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "reset" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<FirstRun />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore the synthetic demo" }));
+    expect(await screen.findByRole("button", { name: "Clear demo data" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear demo data" }));
+
+    expect(await screen.findByText("We could not clear demo data. Your personal data was not changed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear demo data" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Import a statement" })).toBeNull();
+  });
 });

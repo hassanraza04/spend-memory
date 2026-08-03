@@ -8,6 +8,7 @@ describe("AppShell", () => {
 
   beforeEach(() => {
     storage.clear();
+    window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
@@ -18,13 +19,18 @@ describe("AppShell", () => {
   });
 
   it("uses Personal Record by default and persists Night Desk", () => {
-    render(<AppShell>Record</AppShell>);
+    const firstRender = render(<AppShell>Record</AppShell>);
 
     expect(document.documentElement.dataset.theme).toBe("personal-record");
     fireEvent.click(screen.getByRole("button", { name: "Use Night Desk" }));
 
     expect(document.documentElement.dataset.theme).toBe("night-desk");
     expect(storage.get("spend-memory-theme")).toBe("night-desk");
+    firstRender.unmount();
+
+    render(<AppShell>Record</AppShell>);
+
+    expect(document.documentElement.dataset.theme).toBe("night-desk");
   });
 
   it("provides a keyboard-reachable navigation strip", () => {
@@ -44,5 +50,13 @@ describe("AppShell", () => {
     ]);
     links[0].focus();
     expect(document.activeElement).toBe(links[0]);
+  });
+
+  it("marks the URL-selected view as the current section", () => {
+    window.history.replaceState({}, "", "/?view=data");
+    render(<AppShell>Record</AppShell>);
+
+    expect(screen.getByRole("link", { name: "Data" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "This month" }).getAttribute("aria-current")).toBeNull();
   });
 });

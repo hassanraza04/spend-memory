@@ -9,8 +9,15 @@ export type WorkspaceState = {
   merchant?: string;
   category?: string;
   counterparty?: string;
+  status?: string;
   state?: string;
   direction?: string;
+  amountMinMinor?: string;
+  amountMaxMinor?: string;
+  sort?: string;
+  order?: string;
+  limit?: string;
+  offset?: string;
   selected?: string;
 };
 
@@ -23,8 +30,15 @@ const stateKeys = [
   "merchant",
   "category",
   "counterparty",
+  "status",
   "state",
   "direction",
+  "amount_min_minor",
+  "amount_max_minor",
+  "sort",
+  "order",
+  "limit",
+  "offset",
   "selected",
 ] as const;
 
@@ -37,10 +51,19 @@ const fieldForKey = {
   merchant: "merchant",
   category: "category",
   counterparty: "counterparty",
+  status: "status",
   state: "state",
   direction: "direction",
+  amount_min_minor: "amountMinMinor",
+  amount_max_minor: "amountMaxMinor",
+  sort: "sort",
+  order: "order",
+  limit: "limit",
+  offset: "offset",
   selected: "selected",
 } as const;
+
+const views: readonly WorkspaceView[] = ["this-month", "all-activity", "people-places", "patterns", "compare", "data"];
 
 export function workspaceStateFrom(params: URLSearchParams): WorkspaceState {
   return stateKeys.reduce<WorkspaceState>((state, key) => {
@@ -58,4 +81,9 @@ export function toWorkspaceHref(state: WorkspaceState, view: WorkspaceView): str
     if (value) params.set(key, value);
   }
   return `?${params.toString()}`;
+}
+
+export function workspaceViewFrom(params: URLSearchParams): WorkspaceView {
+  const view = params.get("view");
+  return views.includes(view as WorkspaceView) ? (view as WorkspaceView) : "this-month";
 }
