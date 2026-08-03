@@ -1,8 +1,10 @@
+import { AppShell } from "../components/app-shell";
+import { FirstRun } from "../components/first-run";
+
 export default function Page() {
   return (
-    <main>
-      <h1>Spend Memory</h1>
-      <p>Remember every spend, simply.</p>
-    </main>
+    <AppShell>
+      <FirstRun />
+    </AppShell>
   );
 }
