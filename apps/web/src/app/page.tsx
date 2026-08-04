@@ -5,16 +5,29 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
 import { CounterpartyEditor } from "../components/counterparty-editor";
 import { FirstRun } from "../components/first-run";
+import { MerchantView } from "../components/merchant-view";
 import { MonthOverview } from "../components/month-overview";
+import { RecurringView } from "../components/recurring-view";
+import { ReviewView } from "../components/review-view";
+import { ComparisonView } from "../components/comparison-view";
+import { DataView } from "../components/data-view";
 import { SourcePanel } from "../components/source-panel";
 import { TransactionLedger } from "../components/transaction-ledger";
-import { ApiClient, type Page as ApiPage, type Transaction, type WorkspaceLens } from "../lib/api";
+import { ApiClient, type Category, type MerchantEvidence, type Page as ApiPage, type PeriodExplanation, type RecurringCandidate, type ReviewCandidate, type Transaction, type WorkspaceLens } from "../lib/api";
 import { mergeWorkspaceState, toWorkspaceHref, withDefaultMonthRange, workspaceStateFrom, workspaceViewFrom, type WorkspaceState } from "../lib/url-state";
 
 const api = new ApiClient();
 
 function apiScope(state: WorkspaceState): Record<string, string | undefined> {
   return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset };
+}
+
+function comparisonScope(state: WorkspaceState): Record<string, string | undefined> {
+  if (!state.after || !state.before || !state.account || !state.currency) return {};
+  const start = Date.parse(`${state.after}T00:00:00Z`);
+  const end = Date.parse(`${state.before}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return {};
+  return { before_start: new Date(start - (end - start)).toISOString().slice(0, 10), before_end: state.after, after_start: state.after, after_end: state.before, account: state.account, currency: state.currency };
 }
 
 export default function Page() {
@@ -24,6 +37,11 @@ export default function Page() {
   const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [merchants, setMerchants] = useState<MerchantEvidence[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [recurring, setRecurring] = useState<RecurringCandidate[]>([]);
+  const [review, setReview] = useState<ReviewCandidate[]>([]);
+  const [comparison, setComparison] = useState<{ key: string; value: PeriodExplanation }>();
   const [revision, setRevision] = useState(0);
   const view = typeof window === "undefined" ? "this-month" : workspaceViewFrom(new URLSearchParams(window.location.search));
 
@@ -42,6 +60,19 @@ export default function Page() {
     void load.then((result) => { if (current) { setTransactions(result.page); setLens(result.lens); setHasWorkspace(result.hasWorkspace); } }).catch(() => { if (current) { setTransactions(null); setLens(null); setHasWorkspace(false); } });
     return () => { current = false; };
   }, [state, revision]);
+
+  useEffect(() => {
+    if (!hasWorkspace) return;
+    let current = true;
+    if (view === "people-places") void Promise.all([api.listMerchants(), api.listCategories({ currency: state.currency })]).then(([nextMerchants, nextCategories]) => { if (current) { setMerchants(nextMerchants.items); setCategories(nextCategories.items); } }).catch(() => { if (current) { setMerchants([]); setCategories([]); } });
+    if (view === "patterns") void Promise.all([api.listRecurring(), api.listReview()]).then(([nextRecurring, nextReview]) => { if (current) { setRecurring(nextRecurring.items); setReview(nextReview.items); } }).catch(() => { if (current) { setRecurring([]); setReview([]); } });
+    const periodScope = comparisonScope(state);
+    const periodKey = JSON.stringify(periodScope);
+    if (view === "compare") {
+      if (Object.keys(periodScope).length) void api.getComparison(periodScope).then((nextComparison) => { if (current) setComparison({ key: periodKey, value: nextComparison }); }).catch(() => {});
+    }
+    return () => { current = false; };
+  }, [hasWorkspace, revision, state, view]);
 
   function changeScope(patch: Partial<WorkspaceState>) {
     const next = mergeWorkspaceState(state, patch);
@@ -66,10 +97,13 @@ export default function Page() {
       {!hasRecord ? <FirstRun onReady={() => setRevision((value) => value + 1)} /> : <>
         {view === "this-month" && <MonthOverview lens={lens} state={state} />}
         {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
+        {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} />}
+        {view === "patterns" && <><RecurringView flows={lens.lens} recurring={recurring} /><ReviewView flows={lens.lens} review={review} /></>}
+        {view === "compare" && <ComparisonView account={state.account} currency={state.currency} comparison={comparison?.key === JSON.stringify(comparisonScope(state)) ? comparison.value : undefined} />}
+        {view === "data" && <DataView scope={apiScope(state)} onDeleted={() => setRevision((value) => value + 1)} />}
         {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
         {activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
         {groupIds.length > 0 && <CounterpartyEditor transactionIds={groupIds} descriptor={groupIds.length === 1 ? activeSelected?.description ?? "" : ""} onSaved={() => setRevision((value) => value + 1)} />}
-        {!["this-month", "all-activity"].includes(view) && <section className="coming-soon"><p className="eyebrow">Your private record</p><h1>This part of your record is next.</h1><p className="intro">Your selected scope is still held while you move through the record.</p></section>}
       </>}
     </AppShell>
   );

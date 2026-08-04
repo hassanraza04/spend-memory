@@ -47,6 +47,13 @@ export type Page<T> = { items: T[]; limit: number; offset: number; total: number
 export type TransactionScope = Record<string, string | undefined>;
 export type SearchResult = { query: string; items: Transaction[]; lens: CurrencyFlow[] };
 export type Counterparty = { counterparty_id: string; label: string };
+export type Evidence = Record<string, string | number>;
+export type MerchantEvidence = { transaction_id: string; merchant_id: string | null; merchant_name: string | null; status: string; confidence: number; method: string; evidence: Evidence };
+export type Category = { category_id: string; label: string; lens: CurrencyFlow[] };
+export type RecurringCandidate = { candidate_id: string; label: string; cadence: string; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; expected_next_start: string; expected_next_end: string };
+export type ReviewCandidate = { candidate_id: string; kind: "duplicate" | "unusual_spend"; status: string; confidence: number; evidence: Evidence; transaction_ids: string[] };
+export type PeriodContribution = { label: string; amount_minor: number; before_transaction_ids: string[]; after_transaction_ids: string[] };
+export type PeriodExplanation = { before_net_amount_minor: number; after_net_amount_minor: number; difference_net_amount_minor: number; contribution_total_minor: number; remainder_minor: number; text: string; contributions: PeriodContribution[]; before_transaction_ids: string[]; after_transaction_ids: string[] };
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -105,6 +112,14 @@ export class ApiClient {
   async confirmCounterpartyAlias(counterpartyId: string, descriptor: string): Promise<{ status: "saved" }> {
     return this.request<{ status: "saved" }>(`/counterparties/${counterpartyId}`, json("PATCH", { descriptor }));
   }
+
+  async listMerchants(scope: TransactionScope = {}): Promise<Page<MerchantEvidence>> { return this.request<Page<MerchantEvidence>>(`/merchants${query(scope)}`); }
+  async listCategories(scope: TransactionScope = {}): Promise<Page<Category>> { return this.request<Page<Category>>(`/categories${query(scope)}`); }
+  async listRecurring(scope: TransactionScope = {}): Promise<Page<RecurringCandidate>> { return this.request<Page<RecurringCandidate>>(`/recurring${query(scope)}`); }
+  async listReview(scope: TransactionScope = {}): Promise<Page<ReviewCandidate>> { return this.request<Page<ReviewCandidate>>(`/review${query(scope)}`); }
+  async correctMerchant(merchantId: string, descriptor: string): Promise<{ status: "saved" }> { return this.request<{ status: "saved" }>(`/merchants/${merchantId}`, json("PATCH", { descriptor })); }
+  async getComparison(scope: TransactionScope): Promise<PeriodExplanation> { return this.request<PeriodExplanation>(`/comparisons${query(scope)}`); }
+  transactionsExportUrl(scope: TransactionScope = {}): string { return `${this.baseUrl}/exports/transactions.csv${query(scope)}`; }
 
   private async request<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, init);

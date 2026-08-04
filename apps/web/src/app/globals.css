@@ -202,6 +202,48 @@ td span { max-width: 250px; overflow: hidden; color: var(--muted); font-size: 0.
 .group-form label { flex: 1; }
 .save-status { color: var(--evidence) !important; font-weight: 700; }
 .empty-note { padding: 1rem 0; }
+.record-view { margin-bottom: 3rem; }
+.record-view h1 { font-size: clamp(2.25rem, 5vw, 4.2rem); }
+.candidate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.8rem; margin-top: 1rem; }
+.candidate-card, .record-chart, .comparison-totals, .danger-zone { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-raised); }
+.candidate-card { padding: 1rem; }
+.candidate-card h2, .candidate-card h3, .danger-zone h2 { margin-bottom: 0.35rem; font-family: "Source Serif 4 Variable", Georgia, serif; font-weight: 500; letter-spacing: -0.025em; }
+.candidate-card h2 { font-size: 1.4rem; }
+.candidate-card h3 { margin-top: 1rem; font-size: 1rem; }
+.candidate-card p { color: var(--muted); }
+.candidate-heading { display: flex; justify-content: space-between; gap: 0.75rem; }
+.status-badge { display: inline-block; padding: 0.12rem 0.4rem; border-radius: 999px; font-size: 0.73rem; font-weight: 800; line-height: 1.35; }
+.status-badge.confirmed { color: var(--evidence); background: color-mix(in srgb, var(--evidence) 14%, transparent); }
+.status-badge.suggested { color: var(--action); background: color-mix(in srgb, var(--action) 13%, transparent); }
+.candidate-evidence { display: grid; gap: 0.4rem; margin: 0.8rem 0; }
+.candidate-evidence div { display: flex; justify-content: space-between; gap: 0.75rem; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 0.4rem; }
+.candidate-evidence dt { color: var(--muted); font-size: 0.78rem; text-transform: capitalize; }
+.candidate-evidence dd { margin: 0; font-size: 0.82rem; overflow-wrap: anywhere; }
+.inline-correction { display: grid; gap: 0.55rem; margin-top: 0.85rem; }
+.inline-correction label, .confirmation-dialog label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.78rem; font-weight: 700; }
+.inline-correction input, .confirmation-dialog input { min-height: 2.45rem; padding: 0.45rem 0.55rem; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text); background: var(--surface-raised); }
+.inline-correction p { margin: 0; color: var(--evidence); font-weight: 700; }
+.expected-date { color: var(--evidence) !important; font-weight: 700; font-variant-numeric: tabular-nums; }
+.record-chart { margin: 1rem 0; overflow: hidden; }
+.record-chart figcaption { padding: 0.8rem 1rem 0; font-family: "Source Serif 4 Variable", Georgia, serif; font-size: 1.15rem; font-weight: 600; }
+.record-chart table, .contribution-table { min-width: 0; }
+.record-chart th, .record-chart td, .contribution-table th, .contribution-table td { padding-inline: 1rem; }
+.chart-alternative { margin: 0; padding: 0.75rem 1rem; color: var(--muted); font-size: 0.8rem; }
+.comparison-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; }
+.comparison-totals div { padding: 0.9rem; border-right: 1px solid var(--border); }
+.comparison-totals div:last-child { border-right: 0; }
+.comparison-totals dt { color: var(--muted); font-size: 0.78rem; font-weight: 700; }
+.comparison-totals dd { margin: 0.25rem 0 0; font-variant-numeric: tabular-nums; font-weight: 800; }
+.contribution-table { margin-top: 1rem; border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden; }
+.contribution-table caption { padding: 0.85rem 1rem 0.3rem; text-align: left; font-family: "Source Serif 4 Variable", Georgia, serif; font-weight: 600; }
+.danger-zone { margin-top: 2rem; padding: 1rem; border-color: color-mix(in srgb, var(--action) 52%, var(--border)); }
+.danger-zone p { color: var(--muted); }
+.danger { color: var(--action-ink); background: var(--action); }
+.confirmation-dialog { position: fixed; z-index: 5; inset: 0; display: grid; place-items: center; padding: 1rem; background: color-mix(in srgb, var(--navigation) 58%, transparent); }
+.confirmation-dialog > div { width: min(100%, 430px); padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-raised); box-shadow: 0 16px 40px color-mix(in srgb, var(--navigation) 45%, transparent); }
+.confirmation-dialog h2 { margin-bottom: 0.4rem; font-family: "Source Serif 4 Variable", Georgia, serif; font-size: 1.6rem; font-weight: 500; }
+.confirmation-dialog p { color: var(--muted); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; }
 
 .visually-hidden {
   position: absolute;
@@ -228,6 +270,9 @@ td span { max-width: 250px; overflow: hidden; color: var(--muted); font-size: 0.
   .more-filters > div { right: auto; left: 0; grid-template-columns: 1fr; }
   .filter-controls .button { grid-column: span 2; }
   .group-form { display: grid; }
+  .comparison-totals { grid-template-columns: 1fr; }
+  .comparison-totals div { border-right: 0; border-bottom: 1px solid var(--border); }
+  .comparison-totals div:last-child { border-bottom: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,4 +49,16 @@ describe("home page", () => {
 
     expect(await screen.findByRole("complementary", { name: "Source evidence" })).toBeTruthy();
   });
+
+  it("opens recurring patterns inside the retained record scope", async () => {
+    window.history.replaceState({}, "", "/?view=patterns&after=2026-08-01&before=2026-09-01");
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("/recurring") ? { items: [{ candidate_id: "r1", label: "Music", cadence: "monthly", status: "suggested", confidence: 0.9, evidence: {}, transaction_ids: ["t1"], expected_next_start: "2026-09-01", expected_next_end: "2026-09-03" }], total: 1, limit: 100, offset: 0 } : String(url).includes("/review") ? { items: [], total: 0, limit: 100, offset: 0 } : { items: [{}], total: 1, limit: 1, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    expect(await screen.findByRole("heading", { name: "The payments that keep coming back" })).toBeTruthy();
+    expect(await screen.findByText("Expected next: 2026-09-01 to 2026-09-03")).toBeTruthy();
+  });
 });
