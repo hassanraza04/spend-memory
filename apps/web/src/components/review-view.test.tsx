@@ -11,4 +11,11 @@ describe("ReviewView", () => {
     expect(screen.getByText("Evidence")).toBeTruthy();
     expect(screen.getByText("days_apart: 1")).toBeTruthy();
   });
+
+  it("shows a local error instead of claiming nothing needs review", () => {
+    render(<ReviewView flows={[]} review={[]} loadError="Review data could not be loaded. The local record is not ready." />);
+
+    expect(screen.getByText("Review data could not be loaded. The local record is not ready.")).toBeTruthy();
+    expect(screen.queryByText("Nothing needs review in this scope.")).toBeNull();
+  });
 });

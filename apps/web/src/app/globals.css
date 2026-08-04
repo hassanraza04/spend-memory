@@ -215,6 +215,7 @@ td span { max-width: 250px; overflow: hidden; color: var(--muted); font-size: 0.
 .status-badge { display: inline-block; padding: 0.12rem 0.4rem; border-radius: 999px; font-size: 0.73rem; font-weight: 800; line-height: 1.35; }
 .status-badge.confirmed { color: var(--evidence); background: color-mix(in srgb, var(--evidence) 14%, transparent); }
 .status-badge.suggested { color: var(--action); background: color-mix(in srgb, var(--action) 13%, transparent); }
+.status-badge.unresolved { color: var(--muted); background: color-mix(in srgb, var(--muted) 13%, transparent); }
 .candidate-evidence { display: grid; gap: 0.4rem; margin: 0.8rem 0; }
 .candidate-evidence div { display: flex; justify-content: space-between; gap: 0.75rem; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 0.4rem; }
 .candidate-evidence dt { color: var(--muted); font-size: 0.78rem; text-transform: capitalize; }

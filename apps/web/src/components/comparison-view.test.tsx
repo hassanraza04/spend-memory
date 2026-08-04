@@ -11,4 +11,11 @@ describe("ComparisonView", () => {
     expect(screen.getByLabelText("Waterfall text alternative")).toBeTruthy();
     expect(screen.getAllByText((_, element) => element?.tagName === "TD" && element.textContent?.includes("3.00") === true)).toHaveLength(2);
   });
+
+  it("shows the local comparison error instead of an unavailable placeholder", () => {
+    render(<ComparisonView account="Daily" currency="AED" loadError="Comparison could not be loaded. The selected periods cannot be compared." />);
+
+    expect(screen.getByText("Comparison could not be loaded. The selected periods cannot be compared.")).toBeTruthy();
+    expect(screen.queryByText("There is no exact comparison available for this scope yet.")).toBeNull();
+  });
 });

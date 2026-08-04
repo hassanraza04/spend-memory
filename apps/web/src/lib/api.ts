@@ -64,6 +64,10 @@ export class ApiClientError extends Error {
   }
 }
 
+export function localErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiClientError ? `${fallback} ${error.message}` : fallback;
+}
+
 export class ApiClient {
   private readonly baseUrl: string;
 
