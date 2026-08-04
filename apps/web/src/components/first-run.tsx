@@ -30,7 +30,7 @@ function markDemoWorkspace(isDemo: boolean) {
   }
 }
 
-export function FirstRun({ onReady }: Readonly<{ onReady?: () => void }> = {}) {
+export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => void; ready?: boolean }> = {}) {
   const input = useRef<HTMLInputElement>(null);
   const [importState, setImportState] = useState<ImportState>(() => (
     typeof window !== "undefined" && demoWorkspaceIsMarked() ? "demo-ready" : "empty"
@@ -92,7 +92,7 @@ export function FirstRun({ onReady }: Readonly<{ onReady?: () => void }> = {}) {
             </button>
           ) : (
             <>
-              <button className="button primary" type="button" onClick={() => input.current?.click()}>
+            <button className="button primary" type="button" onClick={() => input.current?.click()} disabled={!ready}>
                 Import a statement
               </button>
               <input
@@ -115,7 +115,7 @@ export function FirstRun({ onReady }: Readonly<{ onReady?: () => void }> = {}) {
           <p className="choice-number">02</p>
           <h2>See how it feels</h2>
           <p>Explore synthetic demo data. It is clearly labelled and never mixes with your own records.</p>
-          <button className="button secondary" type="button" onClick={() => void startDemo()} disabled={importState === "demo-loading" || importState === "demo-ready" || importState === "clearing-demo"}>
+          <button className="button secondary" type="button" onClick={() => void startDemo()} disabled={!ready || importState === "demo-loading" || importState === "demo-ready" || importState === "clearing-demo"}>
             Explore the synthetic demo
           </button>
         </article>

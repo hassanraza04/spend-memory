@@ -33,6 +33,13 @@ describe("FirstRun", () => {
     expect(screen.getByRole("button", { name: "Explore the synthetic demo" })).toBeTruthy();
   });
 
+  it("waits for the local record check before starting an import or demo", () => {
+    render(<FirstRun ready={false} />);
+
+    expect(screen.getByRole("button", { name: "Import a statement" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Explore the synthetic demo" })).toHaveProperty("disabled", true);
+  });
+
   it("explains when a chosen file is unsupported", () => {
     render(<FirstRun />);
 

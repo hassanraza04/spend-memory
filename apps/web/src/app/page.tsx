@@ -101,7 +101,7 @@ export default function Page() {
   const activeSelected = selected ?? (state.selected ? transactions?.items.find((transaction) => transaction.transaction_id === state.selected) ?? null : null);
   return (
     <AppShell>
-      {!hasRecord ? <FirstRun onReady={() => setRevision((value) => value + 1)} /> : <>
+      {!hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={() => setRevision((value) => value + 1)} /> : <>
         {view === "this-month" && <MonthOverview lens={lens} state={state} />}
         {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
         {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} loadError={merchantError} />}

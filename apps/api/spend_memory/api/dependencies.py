@@ -39,7 +39,7 @@ class LocalDataService:
         service = get_ingestion_service(self.settings)
         result = service.import_document(
             document=_DEMO_DOCUMENT,
-            filename="spend-memory-demo.csv",
+            filename="aed_january_2026.csv",
             declared_mime_type="text/csv",
         )
         service.repository.mark_document_as_demo(result.document_id)
@@ -123,7 +123,22 @@ def _safe_local_path(path: Path, root: Path) -> Path:
 
 _DEMO_DOCUMENT = (
     b"transaction_id,posted_date,account_id,currency,amount_minor,description,transaction_type\n"
-    b"SYN-90001,2026-08-01,Demo account,AED,-4500,Demo market,debit\n"
-    b"SYN-90002,2026-08-04,Demo account,AED,1200,Demo refund,credit\n"
-    b"SYN-90003,2026-08-07,Demo account,PKR,-18000,Demo transport,debit\n"
+    b"SYN-00835,2026-01-01,AED-SYNTH-001,AED,-10847,BREW-LAB,debit\n"
+    b"SYN-00834,2026-01-03,AED-SYNTH-001,AED,-13577,OrbitFuel Station,debit\n"
+    b"SYN-00837,2026-01-03,AED-SYNTH-001,AED,-2999,STREAMBOX MONTHLY,debit\n"
+    b"SYN-00830,2026-01-04,AED-SYNTH-001,AED,-13115,ORBIT FUEL,debit\n"
+    b"SYN-00825,2026-01-06,AED-SYNTH-001,AED,-3988,PXLBKS,debit\n"
+    b"SYN-00831,2026-01-06,AED-SYNTH-001,AED,-3936,QKCRT*ONLINE,debit\n"
+    b"SYN-00838,2026-01-06,AED-SYNTH-001,AED,-12999,ATLAS COVER ANNUAL,debit\n"
+    b"SYN-00836,2026-01-15,AED-SYNTH-001,AED,-13791,HBR PHARM,debit\n"
+    b"SYN-00832,2026-01-17,AED-SYNTH-001,AED,-12297,OrbitFuel Station,debit\n"
+    b"SYN-00826,2026-01-19,AED-SYNTH-001,AED,-5615,MetroMart POS,debit\n"
+    b"SYN-00828,2026-01-20,AED-SYNTH-001,AED,-10569,ORBIT-FUEL,debit\n"
+    b"SYN-00824,2026-01-22,AED-SYNTH-001,AED,-9340,Quick Cart,debit\n"
+    b"SYN-00833,2026-01-24,AED-SYNTH-001,AED,-14015,HBR PHARM,debit\n"
+    b"SYN-00829,2026-01-25,AED-SYNTH-001,AED,-18406,Harbor Pharm,debit\n"
+    b"SYN-00823,2026-01-26,AED-SYNTH-001,AED,-947,HARBOR PHARMACY,debit\n"
+    b"SYN-00827,2026-01-26,AED-SYNTH-001,AED,-3056,PixelBooks Online,debit\n"
+    b"SYN-00821,2026-01-27,AED-SYNTH-001,AED,-3927,HBR PHARM,debit\n"
+    b"SYN-00822,2026-01-27,AED-SYNTH-001,AED,-18054,ORBIT FUEL,debit\n"
 )

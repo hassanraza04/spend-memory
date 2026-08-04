@@ -220,7 +220,7 @@ class EnrichmentRepository:
 
     def list_search_rows(self) -> list[SearchRow]:
         try:
-            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            with duckdb.connect(str(self.database_path)) as connection:
                 rows = connection.execute(
                     """
                     SELECT transactions.raw_transaction_id, transactions.account_identity,
@@ -346,7 +346,7 @@ class EnrichmentRepository:
         return None if row is None else Category(*row)
 
     def list_categories(self) -> list[Category]:
-        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+        with duckdb.connect(str(self.database_path)) as connection:
             rows = connection.execute(
                 "SELECT category_id, category_label FROM categories ORDER BY category_label, category_id"
             ).fetchall()
@@ -784,16 +784,17 @@ class EnrichmentRepository:
 
     def list_merchant_evidence(self) -> list[MerchantEvidence]:
         try:
-            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            with duckdb.connect(str(self.database_path)) as connection:
                 rows = connection.execute(
                     """
-                    SELECT transactions.raw_transaction_id, annotations.merchant_id,
+                    SELECT transactions.raw_transaction_id, annotations.merchant_id AS merchant_id,
                         merchants.merchant_name, annotations.resolution_status,
                         annotations.confidence, annotations.method, annotations.evidence_json
                     FROM analytics.mart_transactions AS transactions
                     JOIN transaction_merchant_annotations AS annotations
                         USING (raw_transaction_id)
-                    LEFT JOIN merchants USING (merchant_id)
+                    LEFT JOIN merchants
+                        ON merchants.merchant_id = annotations.merchant_id
                     ORDER BY transactions.transaction_date, transactions.raw_transaction_id
                     """
                 ).fetchall()
@@ -809,7 +810,7 @@ class EnrichmentRepository:
 
     def list_recurring_evidence(self) -> list[RecurringEvidence]:
         try:
-            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            with duckdb.connect(str(self.database_path)) as connection:
                 candidates = connection.execute(
                     """
                     SELECT candidates.recurring_candidate_id, candidates.normalized_descriptor,
@@ -851,7 +852,7 @@ class EnrichmentRepository:
 
     def list_review_evidence(self) -> list[ReviewEvidence]:
         try:
-            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            with duckdb.connect(str(self.database_path)) as connection:
                 duplicates = connection.execute(
                     """
                     SELECT candidates.duplicate_candidate_id, candidates.confidence,

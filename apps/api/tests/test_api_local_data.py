@@ -50,8 +50,24 @@ def test_demo_reset_creates_marked_synthetic_records(tmp_path: Path) -> None:
             "SELECT original_filename, is_demo FROM source_documents"
         ).fetchone()
         transaction_count = connection.execute("SELECT count(*) FROM raw_transactions").fetchone()
-    assert document == ("spend-memory-demo.csv", True)
-    assert transaction_count is not None and transaction_count[0] > 0
+    assert document == ("aed_january_2026.csv", True)
+    assert transaction_count == (18,)
+
+
+def test_demo_reset_uses_the_reconcilable_synthetic_statement(tmp_path: Path) -> None:
+    database_path = tmp_path / "spend-memory.duckdb"
+    client = TestClient(create_app(database_path, tmp_path / "data"))
+
+    response = client.post("/api/v1/demo/reset")
+
+    assert response.status_code == 200
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        document = connection.execute(
+            "SELECT original_filename, is_demo FROM source_documents"
+        ).fetchone()
+        transaction_count = connection.execute("SELECT count(*) FROM raw_transactions").fetchone()
+    assert document == ("aed_january_2026.csv", True)
+    assert transaction_count == (18,)
 
 
 def test_demo_reset_rejects_a_user_imported_canonical_csv(tmp_path: Path) -> None:

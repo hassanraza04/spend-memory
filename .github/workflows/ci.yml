@@ -26,6 +26,10 @@ jobs:
       - run: make lint
       - run: make test
       - run: pnpm --dir apps/web build
+      - name: Run local browser workflows
+        run: |
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+          make e2e
       - name: Start Compose services
         run: docker compose up --build -d
       - name: Verify HTTP endpoints

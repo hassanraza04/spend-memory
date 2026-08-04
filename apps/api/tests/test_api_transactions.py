@@ -2,11 +2,14 @@ from datetime import date
 from pathlib import Path
 from uuid import UUID
 
+import duckdb
 from app.main import create_app
 from fastapi.testclient import TestClient
 from spend_memory.api.dependencies import get_enrichment_repository
 from spend_memory.enrichment.models import CategoryDecision, TrustedTransaction
+from spend_memory.enrichment.repository import EnrichmentRepository
 from spend_memory.enrichment.search import SearchRow
+from spend_memory.enrichment.service import EnrichmentService
 
 from apps.api.tests.test_analytics_models import _build_fixture_database, _dbt_build
 
@@ -90,3 +93,40 @@ def test_transactions_read_trusted_mart_rows_only(tmp_path: Path) -> None:
     assert response.json()["total"] == 864
     document = response.json()["items"][0]["source"]["document"]
     assert document.endswith((".csv", ".pdf"))
+
+
+def test_empty_workspace_reports_trusted_records_are_not_ready(tmp_path: Path) -> None:
+    response = TestClient(
+        create_app(tmp_path / "spend-memory.duckdb", tmp_path / "documents")
+    ).get("/api/v1/transactions")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "trusted_records_unavailable"
+
+
+def test_transactions_use_the_local_database_connection_mode(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions")
+
+    with duckdb.connect(str(database_path)):
+        response = TestClient(
+            create_app(database_path, tmp_path / "documents")
+        ).get("/api/v1/transactions?limit=1")
+
+    assert response.status_code == 200
+
+
+def test_review_evidence_uses_the_local_database_connection_mode(tmp_path: Path) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions")
+    EnrichmentService(EnrichmentRepository(database_path)).refresh()
+    _dbt_build(database_path, "mart_recurring_groups mart_transactions")
+
+    with duckdb.connect(str(database_path)):
+        client = TestClient(create_app(database_path, tmp_path / "documents"))
+        merchants = client.get("/api/v1/merchants")
+        categories = client.get("/api/v1/categories")
+        recurring = client.get("/api/v1/recurring")
+        review = client.get("/api/v1/review")
+
+    assert merchants.status_code == categories.status_code == recurring.status_code == review.status_code == 200
