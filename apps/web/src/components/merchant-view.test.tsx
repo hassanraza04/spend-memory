@@ -20,6 +20,7 @@ describe("MerchantView", () => {
     expect(screen.getByText("Whole-record merchant and category evidence")).toBeTruthy();
     expect(screen.getByTestId("merchant-card-1").getAttribute("data-resolution-method")).toBe("manual");
     expect(screen.getByTestId("merchant-card-1").getAttribute("data-normalized-descriptor")).toBe("cafe north");
+    expect(screen.getByLabelText("Merchant evidence: manual for cafe north")).toBeTruthy();
   });
 
   it("labels an unresolved merchant without calling it a suggestion", () => {

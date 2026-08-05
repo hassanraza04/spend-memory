@@ -42,7 +42,7 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
 
   refreshEnrichment(rebuildAnalytics);
   await page.reload();
-  const exactAlias = page.getByTestId(`merchant-card-${seeded.transaction_id}`);
+  const exactAlias = page.getByLabel("Merchant evidence: confirmed_alias for metro mart");
   await expect(exactAlias).toContainText("Confirmed");
   await expect(exactAlias).toHaveAttribute("data-resolution-method", "confirmed_alias");
   await expect(exactAlias).toHaveAttribute("data-normalized-descriptor", "metro mart");

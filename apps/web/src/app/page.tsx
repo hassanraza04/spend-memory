@@ -101,13 +101,12 @@ export default function Page() {
   const activeSelected = selected ?? (state.selected ? transactions?.items.find((transaction) => transaction.transaction_id === state.selected) ?? null : null);
   return (
     <AppShell>
-      {!hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={() => setRevision((value) => value + 1)} /> : <>
+      {view === "data" ? <DataView scope={apiScope(state)} onDeleted={() => setRevision((value) => value + 1)} /> : !hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={() => setRevision((value) => value + 1)} /> : <>
         {view === "this-month" && <MonthOverview lens={lens} state={state} />}
         {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
         {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} loadError={merchantError} />}
         {view === "patterns" && <><RecurringView flows={lens.lens} recurring={recurring} loadError={recurringError} /><ReviewView flows={lens.lens} review={review} loadError={reviewError} /></>}
         {view === "compare" && <ComparisonView account={state.account} currency={state.currency} comparison={comparison?.key === JSON.stringify(comparisonScope(state)) ? comparison.value : undefined} loadError={comparisonError?.key === JSON.stringify(comparisonScope(state)) ? comparisonError.message : undefined} />}
-        {view === "data" && <DataView scope={apiScope(state)} onDeleted={() => setRevision((value) => value + 1)} />}
         {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
         {activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
         {groupIds.length > 0 && <CounterpartyEditor transactionIds={groupIds} descriptor={groupIds.length === 1 ? activeSelected?.description ?? "" : ""} onSaved={() => setRevision((value) => value + 1)} />}

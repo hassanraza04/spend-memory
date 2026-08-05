@@ -61,4 +61,13 @@ describe("home page", () => {
     expect(await screen.findByRole("heading", { name: "The payments that keep coming back" })).toBeTruthy();
     expect(await screen.findByText("Expected next: 2026-09-01 to 2026-09-03")).toBeTruthy();
   });
+
+  it("keeps local data controls available while the record refreshes", () => {
+    window.history.replaceState({}, "", "/?view=data");
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
+    render(<Page />);
+
+    expect(screen.getByRole("link", { name: "Export current CSV" })).toBeTruthy();
+  });
 });
