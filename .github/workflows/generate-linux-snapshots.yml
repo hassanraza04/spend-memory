@@ -2,6 +2,11 @@ name: Generate Linux screenshots
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/api-interface
+    paths:
+      - .github/workflows/generate-linux-snapshots.yml
 
 jobs:
   generate:
