@@ -1,6 +1,6 @@
 import type { Page as ApiPage } from "../../src/lib/api";
 
-import { createMerchant, expect, fixturePath, importStatement, refreshEnrichment, test } from "./fixtures";
+import { createMerchant, expect, fixturePath, importStatement, refreshEnrichment, reloadTrustedRecord, test } from "./fixtures";
 
 type MerchantEvidence = {
   transaction_id: string;
@@ -17,12 +17,13 @@ async function merchants(page: import("@playwright/test").Page): Promise<Merchan
 }
 
 test("inspects recurring evidence and saves a merchant correction locally", async ({ page, freshRecord, rebuildAnalytics }) => {
+  const scope = "?after=2024-01-01&before=2024-04-01";
   await freshRecord();
-  await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_statement_tabular.pdf"), "?after=2024-01-01&before=2024-04-01");
+  await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_statement_tabular.pdf"), scope);
   await expect(page).toHaveURL(/after=2024-01-01.*before=2024-04-01/);
   createMerchant("METROMART POS");
   refreshEnrichment(rebuildAnalytics);
-  await page.reload();
+  await reloadTrustedRecord(page, rebuildAnalytics, scope);
   await page.getByRole("link", { name: "Patterns" }).click();
   await expect(page).toHaveURL(/view=patterns.*after=2024-01-01.*before=2024-04-01/);
   await expect(page.getByRole("heading", { name: "The payments that keep coming back" })).toBeVisible();
@@ -44,7 +45,8 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
   await expect(page.getByText("Saved.")).toBeVisible();
 
   refreshEnrichment(rebuildAnalytics);
-  await page.reload();
+  await reloadTrustedRecord(page, rebuildAnalytics, scope);
+  await page.getByRole("link", { name: "People & places" }).click();
   await expect(page).toHaveURL(/view=people-places.*after=2024-01-01.*before=2024-04-01/);
   const exactAlias = page.getByLabel("Merchant evidence: confirmed_alias for metro mart");
   await expect(exactAlias).toContainText("Confirmed");
