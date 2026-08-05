@@ -24,7 +24,8 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*56\.15/);
 });
 
-test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord, rebuildAnalytics }) => {
+test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord, rebuildAnalytics }, testInfo) => {
+  expect(testInfo.snapshotPath("wide-desktop.png", { kind: "screenshot" })).toMatch(new RegExp(`wide-desktop-${process.platform}\\.png$`));
   await freshRecord();
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
