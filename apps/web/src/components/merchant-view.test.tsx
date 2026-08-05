@@ -10,7 +10,7 @@ describe("MerchantView", () => {
 
   it("keeps confirmed and suggested merchant evidence distinct", () => {
     render(<MerchantView flows={flows} merchants={[
-      { transaction_id: "1", merchant_id: "a", merchant_name: "Cafe North", status: "confirmed", confidence: 1, method: "manual", evidence: { descriptor: "CAFE NORTH" } },
+      { transaction_id: "1", merchant_id: "a", merchant_name: "Cafe North", status: "confirmed", confidence: 1, method: "manual", evidence: { descriptor: "CAFE NORTH", normalized_descriptor: "cafe north" } },
       { transaction_id: "2", merchant_id: null, merchant_name: "Cafe N.", status: "suggested", confidence: 0.72, method: "lexical", evidence: { descriptor: "CAFE N" } },
     ]} categories={[]} counterpartyLabel="Rina" />);
 
@@ -18,6 +18,8 @@ describe("MerchantView", () => {
     expect(screen.getByText("Suggested")).toBeTruthy();
     expect(screen.getByText("Current person or account: Rina")).toBeTruthy();
     expect(screen.getByText("Whole-record merchant and category evidence")).toBeTruthy();
+    expect(screen.getByTestId("merchant-card-1").getAttribute("data-resolution-method")).toBe("manual");
+    expect(screen.getByTestId("merchant-card-1").getAttribute("data-normalized-descriptor")).toBe("cafe north");
   });
 
   it("labels an unresolved merchant without calling it a suggestion", () => {

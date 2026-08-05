@@ -42,15 +42,10 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
 
   refreshEnrichment(rebuildAnalytics);
   await page.reload();
-  const exactAlias = (await merchants(page)).find((merchant) => (
-    merchant.merchant_name === "METROMART POS"
-    && merchant.status === "confirmed"
-    && merchant.method === "confirmed_alias"
-    && merchant.evidence.normalized_descriptor === "metro mart"
-  ));
-  expect(exactAlias).toBeDefined();
-  if (!exactAlias) throw new Error("The exact merchant alias was not reused after refresh.");
-  await expect(page.getByTestId(`merchant-card-${exactAlias.transaction_id}`)).toContainText("Confirmed");
+  const exactAlias = page.getByTestId(`merchant-card-${seeded.transaction_id}`);
+  await expect(exactAlias).toContainText("Confirmed");
+  await expect(exactAlias).toHaveAttribute("data-resolution-method", "confirmed_alias");
+  await expect(exactAlias).toHaveAttribute("data-normalized-descriptor", "metro mart");
 });
 
 test("shows possible duplicate evidence from the synthetic PKR statement", async ({ page, freshRecord, rebuildAnalytics }) => {

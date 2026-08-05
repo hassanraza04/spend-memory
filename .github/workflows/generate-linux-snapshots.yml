@@ -28,7 +28,7 @@ jobs:
       - run: uv sync --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir apps/web exec playwright install --with-deps chromium
-      - run: pnpm --dir apps/web exec playwright test --update-snapshots --reporter=list
+      - run: pnpm --dir apps/web exec playwright test tests/e2e/demo.spec.ts --grep "readable" --update-snapshots --reporter=list
       - uses: actions/upload-artifact@v4
         with:
           name: linux-playwright-snapshots
