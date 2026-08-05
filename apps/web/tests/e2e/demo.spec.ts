@@ -1,7 +1,7 @@
 import { expect, reloadTrustedRecord, test, waitForWorkspaceRefresh } from "./fixtures";
 
 test("explores the synthetic demo with source evidence and a grouped AED flow", async ({ page, freshRecord, rebuildAnalytics }) => {
-  await freshRecord(page);
+  await freshRecord();
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
   await expect(page.getByText("Synthetic demo data is ready.")).toBeVisible();
@@ -18,14 +18,14 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   await page.getByLabel("Group MetroMart POS").check();
   await page.getByLabel("Counterparty name").fill("Weekend groceries");
   await page.getByRole("button", { name: "Create and group" }).click();
-  const flow = page.locator(".counterparty-editor .currency-flow").filter({ hasText: "AED" });
+  const flow = page.getByLabel("AED flow");
   await expect(flow).toContainText(/Sent[\s\S]*56\.15/);
   await expect(flow).toContainText(/Received[\s\S]*0\.00/);
   await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*56\.15/);
 });
 
 test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord, rebuildAnalytics }) => {
-  await freshRecord(page);
+  await freshRecord();
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
   await refreshed;

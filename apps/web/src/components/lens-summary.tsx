@@ -7,7 +7,7 @@ export function LensSummary({ flows }: Readonly<{ flows: readonly CurrencyFlow[]
   return (
     <div className="lens-summary" aria-label="Currency-separated activity summary">
       {flows.map((flow) => (
-        <dl key={flow.currency} className="currency-flow">
+        <dl key={flow.currency} className="currency-flow" aria-label={`${flow.currency} flow`}>
           <dt>{flow.currency}</dt>
           <dd><span>Sent</span>{formatMoney(flow.sent_minor, flow.currency)}</dd>
           <dd><span>Received</span>{formatMoney(flow.received_minor, flow.currency)}</dd>

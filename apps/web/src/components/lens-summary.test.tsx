@@ -16,6 +16,8 @@ describe("LensSummary", () => {
 
     expect(screen.getByText("AED")).toBeTruthy();
     expect(screen.getByText("PKR")).toBeTruthy();
+    expect(screen.getByLabelText("AED flow")).toBeTruthy();
+    expect(screen.getByLabelText("PKR flow")).toBeTruthy();
     expect(screen.getAllByText("Sent")).toHaveLength(2);
     expect(screen.getAllByText("Received")).toHaveLength(2);
     expect(screen.getAllByText("Net flow")).toHaveLength(2);

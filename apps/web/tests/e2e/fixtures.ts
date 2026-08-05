@@ -8,11 +8,9 @@ const databasePath = resolve(dataRoot, "spend-memory.duckdb");
 
 export const fixturePath = (...parts: string[]) => resolve(root, "sample_data", ...parts);
 
-// eslint-disable-next-line no-unused-vars -- This is the browser page passed to each test fixture.
-export const test = base.extend<{ freshRecord: (page: Page) => Promise<void>; rebuildAnalytics: () => void }>({
-  freshRecord: async (fixtures, run) => {
-    void fixtures;
-    await run(async (page) => {
+export const test = base.extend<{ freshRecord: () => Promise<void>; rebuildAnalytics: () => void }>({
+  freshRecord: async ({ page }, run) => {
+    await run(async () => {
       const cleared = await page.request.delete("http://127.0.0.1:8000/api/v1/local-data", {
         data: { confirmation: "DELETE LOCAL DATA" },
       });
@@ -24,8 +22,8 @@ export const test = base.extend<{ freshRecord: (page: Page) => Promise<void>; re
       await expect(page.getByRole("button", { name: "Explore the synthetic demo" })).toBeEnabled();
     });
   },
-  rebuildAnalytics: async (fixtures, run) => {
-    void fixtures;
+  rebuildAnalytics: async ({ page }, run) => {
+    void page;
     await run(() => {
       execFileSync("uv", ["run", "dbt", "build", "--project-dir", "analytics", "--profiles-dir", "analytics"], {
         cwd: root,

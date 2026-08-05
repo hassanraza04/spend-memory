@@ -10,6 +10,7 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   expect: { timeout: 10_000 },
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   use: {
     baseURL: "http://127.0.0.1:3000",
     screenshot: "only-on-failure",

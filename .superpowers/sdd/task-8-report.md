@@ -38,3 +38,12 @@ I inspected the wide desktop, laptop, tablet, and narrow mobile snapshots. The h
 ## Ponytail review
 
 The work reuses the existing local API, dbt project, synthetic fixtures, browser controls, and CSS. No mock server, test data service, chart package, screenshot service, or extra runtime dependency was added. The only new package is the required free Playwright test runner.
+
+## Review repair
+
+- Screenshot paths are now platform-neutral. The four baseline names no longer include `darwin`, so Linux CI and local macOS runs use the same reviewed convention.
+- The comparison journey now asserts exact rendered earlier, later, and change totals, plus the named contributor rows and their evidence counts.
+- The export journey reads the downloaded CSV. It checks the scoped row count, known included and excluded records, and formula neutralization of a real local counterparty label beginning with `=`.
+- The merchant journey now selects one specific suggested transaction by test id, saves `METRO MART`, refreshes enrichment, and proves that a specific `metro mart` transaction returns as `METROMART POS` through the `confirmed_alias` method.
+- Currency flow summaries now expose one accessible name per currency, so the demo journey scopes its exact AED values without a CSS selector.
+- Local verification after the repair passed: full Playwright suite 8 of 8, five repeats of all 8 workflows for 40 of 40, web units 51 of 51, lint, and `git diff --check`.
