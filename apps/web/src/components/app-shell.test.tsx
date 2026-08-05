@@ -59,4 +59,14 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "Data" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "This month" }).getAttribute("aria-current")).toBeNull();
   });
+
+  it("keeps the live explicit scope when a section link was rendered before hydration", () => {
+    render(<AppShell>Record</AppShell>);
+    window.history.replaceState({}, "", "/?after=2024-01-01&before=2024-04-01");
+
+    const patterns = screen.getByRole("link", { name: "Patterns" });
+    fireEvent.click(patterns);
+
+    expect(patterns.getAttribute("href")).toBe("?view=patterns&after=2024-01-01&before=2024-04-01");
+  });
 });
