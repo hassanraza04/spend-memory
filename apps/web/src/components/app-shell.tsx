@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent, ReactNode } from "react";
+import { useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 
 import { toWorkspaceHref, workspaceStateFrom, workspaceViewFrom, type WorkspaceView } from "../lib/url-state";
 import { ThemeToggle } from "./theme-toggle";
@@ -18,8 +18,20 @@ function keepLiveScope(event: MouseEvent<HTMLAnchorElement>, view: WorkspaceView
   event.currentTarget.setAttribute("href", toWorkspaceHref(workspaceStateFrom(new URLSearchParams(window.location.search)), view));
 }
 
+function subscribeToNothing() {
+  return () => {};
+}
+
+function browserSearch() {
+  return window.location.search;
+}
+
+function serverSearch() {
+  return "";
+}
+
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
-  const params = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(useSyncExternalStore(subscribeToNothing, browserSearch, serverSearch));
   const state = workspaceStateFrom(params);
   const activeView = workspaceViewFrom(params);
 
