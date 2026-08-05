@@ -40,6 +40,7 @@ export async function reloadTrustedRecord(page: Page, rebuildAnalytics: () => vo
   rebuildAnalytics();
   await page.goto(`/${search}`);
   await expect(page.getByText("Here is the exact trusted activity in your current scope.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "People & places" })).toBeVisible();
 }
 
 export function refreshEnrichment(rebuildAnalytics: () => void) {
