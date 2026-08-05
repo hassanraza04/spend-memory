@@ -12,7 +12,9 @@ test("exports the active trusted scope and requires exact local deletion confirm
   await page.getByRole("button", { name: "Create and group" }).click();
   await expect(page.getByText("Grouped under =Weekend groceries.")).toBeVisible();
 
-  await page.goto("/?view=data&after=2026-01-01&before=2026-02-01");
+  await expect(page).toHaveURL(/after=2026-01-01.*before=2026-02-01/);
+  await page.getByRole("link", { name: "Data" }).click();
+  await expect(page).toHaveURL(/view=data.*after=2026-01-01.*before=2026-02-01/);
   const download = page.waitForEvent("download");
   await page.getByRole("link", { name: "Export current CSV" }).click();
   const exported = await download;

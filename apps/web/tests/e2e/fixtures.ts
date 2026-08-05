@@ -89,7 +89,7 @@ export function createMerchant(merchantName: string) {
   );
 }
 
-export async function importStatement(page: Page, rebuildAnalytics: () => void, path: string, search = "") {
+export async function importStatement(page: Page, rebuildAnalytics: () => void, path: string, search = new URL(page.url()).search) {
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(path);
   await expect(page.getByText("Your record is ready to review.")).toBeVisible();

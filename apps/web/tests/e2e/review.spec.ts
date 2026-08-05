@@ -18,15 +18,18 @@ async function merchants(page: import("@playwright/test").Page): Promise<Merchan
 
 test("inspects recurring evidence and saves a merchant correction locally", async ({ page, freshRecord, rebuildAnalytics }) => {
   await freshRecord();
-  await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_statement_tabular.pdf"));
+  await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_statement_tabular.pdf"), "?after=2024-01-01&before=2024-04-01");
+  await expect(page).toHaveURL(/after=2024-01-01.*before=2024-04-01/);
   createMerchant("METROMART POS");
   refreshEnrichment(rebuildAnalytics);
   await page.reload();
   await page.getByRole("link", { name: "Patterns" }).click();
+  await expect(page).toHaveURL(/view=patterns.*after=2024-01-01.*before=2024-04-01/);
   await expect(page.getByRole("heading", { name: "The payments that keep coming back" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /streambox monthly/i })).toBeVisible();
 
   await page.getByRole("link", { name: "People & places" }).click();
+  await expect(page).toHaveURL(/view=people-places.*after=2024-01-01.*before=2024-04-01/);
   const seeded = (await merchants(page)).find((merchant) => (
     merchant.merchant_name === "METROMART POS"
     && merchant.status === "suggested"
@@ -42,6 +45,7 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
 
   refreshEnrichment(rebuildAnalytics);
   await page.reload();
+  await expect(page).toHaveURL(/view=people-places.*after=2024-01-01.*before=2024-04-01/);
   const exactAlias = page.getByLabel("Merchant evidence: confirmed_alias for metro mart");
   await expect(exactAlias).toContainText("Confirmed");
   await expect(exactAlias).toHaveAttribute("data-resolution-method", "confirmed_alias");
