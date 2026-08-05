@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Page from "./page";
@@ -69,5 +69,21 @@ describe("home page", () => {
     render(<Page />);
 
     expect(screen.getByRole("link", { name: "Export current CSV" })).toBeTruthy();
+  });
+
+  it("returns to the first-run choice after local data is deleted", async () => {
+    window.history.replaceState({}, "", "/?view=data");
+    vi.stubGlobal("fetch", vi.fn((url: string | URL, init?: { method?: string }) => Promise.resolve(new Response(JSON.stringify(
+      init?.method === "DELETE" ? { status: "deleted" } : String(url).includes("/lens") ? { lens: [], trend: [] } : { items: [], total: 1, limit: 1, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    await screen.findByRole("link", { name: "Export current CSV" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete local data" }));
+    fireEvent.change(screen.getByLabelText("Type DELETE LOCAL DATA"), { target: { value: "DELETE LOCAL DATA" } });
+    fireEvent.click(screen.getByRole("button", { name: "Permanently delete local data" }));
+
+    expect(await screen.findByRole("button", { name: "Import a statement" })).toBeTruthy();
   });
 });
