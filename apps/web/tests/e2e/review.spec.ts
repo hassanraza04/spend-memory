@@ -48,7 +48,14 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
   await reloadTrustedRecord(page, rebuildAnalytics, scope);
   await page.getByRole("link", { name: "People & places" }).click();
   await expect(page).toHaveURL(/view=people-places.*after=2024-01-01.*before=2024-04-01/);
-  const exactAlias = page.getByLabel("Merchant evidence: confirmed_alias for metro mart");
+  const resolved = (await merchants(page)).find((merchant) => (
+    merchant.status === "confirmed"
+    && merchant.method === "confirmed_alias"
+    && merchant.evidence.normalized_descriptor === "metro mart"
+  ));
+  expect(resolved).toBeDefined();
+  if (!resolved) throw new Error("The corrected merchant alias was not available.");
+  const exactAlias = page.getByTestId(`merchant-card-${resolved.transaction_id}`);
   await expect(exactAlias).toContainText("Confirmed");
   await expect(exactAlias).toHaveAttribute("data-resolution-method", "confirmed_alias");
   await expect(exactAlias).toHaveAttribute("data-normalized-descriptor", "metro mart");

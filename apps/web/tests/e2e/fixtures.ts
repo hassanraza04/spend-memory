@@ -44,7 +44,6 @@ export async function reloadTrustedRecord(page: Page, rebuildAnalytics: () => vo
 }
 
 export function refreshEnrichment(rebuildAnalytics: () => void) {
-  rebuildAnalytics();
   execFileSync(
     "uv",
     [
