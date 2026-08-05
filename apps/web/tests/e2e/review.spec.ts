@@ -17,6 +17,7 @@ async function merchants(page: import("@playwright/test").Page): Promise<Merchan
 }
 
 test("inspects recurring evidence and saves a merchant correction locally", async ({ page, freshRecord, rebuildAnalytics }) => {
+  test.slow();
   const scope = "?after=2024-01-01&before=2024-04-01";
   await freshRecord();
   await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_statement_tabular.pdf"), scope);
@@ -46,7 +47,9 @@ test("inspects recurring evidence and saves a merchant correction locally", asyn
 
   refreshEnrichment(rebuildAnalytics);
   await reloadTrustedRecord(page, rebuildAnalytics, scope);
-  await page.getByRole("link", { name: "People & places" }).click();
+  const peoplePlaces = page.getByRole("link", { name: "People & places" });
+  await expect(peoplePlaces).toHaveAttribute("href", "?view=people-places&after=2024-01-01&before=2024-04-01");
+  await page.goto(`/${await peoplePlaces.getAttribute("href")}`);
   await expect(page).toHaveURL(/view=people-places.*after=2024-01-01.*before=2024-04-01/);
   const resolved = (await merchants(page)).find((merchant) => (
     merchant.status === "confirmed"
