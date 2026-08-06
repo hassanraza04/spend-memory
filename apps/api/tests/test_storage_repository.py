@@ -15,7 +15,7 @@ from threading import Event, Lock
 import duckdb
 import fitz
 import pytest
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 
 CSV_DOCUMENT = (
     b"posted_date,description,amount\n"
@@ -25,6 +25,7 @@ CSV_DOCUMENT = (
 
 class StubParser:
     parser_id = "stub-parser"
+    capabilities = ParserCapabilities(True, False, False, True, True)
 
     def __init__(
         self,

@@ -23,8 +23,6 @@ from spend_memory.ingestion.base import (
     StatementParser,
 )
 
-_LEGACY_CAPABILITIES = ParserCapabilities(True, False, False, False, False)
-
 
 class ParserErrorCode(str, Enum):
     UNSUPPORTED = "unsupported"
@@ -69,7 +67,11 @@ class ParserRegistry:
             candidates = [
                 (parser.can_parse(document, filename), parser)
                 for parser in self._parsers
-                if not getattr(parser, "capabilities", _LEGACY_CAPABILITIES).experimental
+                if isinstance(
+                    capabilities := getattr(parser, "capabilities", None),
+                    ParserCapabilities,
+                )
+                and not capabilities.experimental
             ]
         except StatementParserError:
             raise

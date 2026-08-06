@@ -14,7 +14,7 @@ from threading import Event
 import fitz
 import pytest
 from spend_memory.ingestion import registry as registry_module
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 from spend_memory.ingestion.parsers.canonical_csv import CanonicalCsvParser
 from spend_memory.ingestion.parsers.synthetic_pdf_a import (
     SyntheticAedTabularPdfParser,
@@ -41,6 +41,7 @@ SOURCE_DIRECTORY = REPOSITORY_ROOT / "sample_data/source"
 class _Parser:
     parser_id = "test-parser"
     version = "1.0"
+    capabilities = ParserCapabilities(True, False, False, True, True)
 
     def __init__(self) -> None:
         self.detection_calls = 0
