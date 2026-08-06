@@ -60,6 +60,13 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "This month" }).getAttribute("aria-current")).toBeNull();
   });
 
+  it("keeps the synthetic demo label visible after first run", () => {
+    storage.set("spend-memory-demo-workspace", "true");
+    render(<AppShell>Record</AppShell>);
+
+    expect(screen.getByText("Synthetic demo")).toBeTruthy();
+  });
+
   it("keeps the live explicit scope when a section link was rendered before hydration", () => {
     render(<AppShell>Record</AppShell>);
     window.history.replaceState({}, "", "/?after=2024-01-01&before=2024-04-01");

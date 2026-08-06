@@ -168,6 +168,18 @@ class ImportResponse(BaseModel):
     parser_version: str
 
 
+class ImportInspectionResponse(BaseModel):
+    document_id: UUID
+    run_id: UUID
+    original_filename: str
+    mime_type: str
+    byte_size: int
+    transaction_count: int
+    parser_id: str
+    parser_version: str
+    is_demo: bool
+
+
 class CounterpartyAssignmentRequest(BaseModel):
     transaction_ids: list[UUID] = Field(min_length=1, max_length=100)
 
@@ -175,6 +187,20 @@ class CounterpartyAssignmentRequest(BaseModel):
     def reject_duplicate_transactions(self) -> "CounterpartyAssignmentRequest":
         if len(set(self.transaction_ids)) != len(self.transaction_ids):
             raise ValueError("duplicate_transaction_ids")
+        return self
+
+
+class CounterpartyScope(PageRequest):
+    after: date | None = None
+    before: date | None = None
+    account: str | None = None
+    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    direction: Direction | None = None
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "CounterpartyScope":
+        if self.after is not None and self.before is not None and self.after >= self.before:
+            raise ValueError("after_must_precede_before")
         return self
 
 
@@ -187,6 +213,10 @@ class CounterpartyLensResponse(BaseModel):
 class CounterpartyResponse(BaseModel):
     counterparty_id: UUID
     label: str
+
+
+class CounterpartyDetailResponse(CounterpartyLensResponse):
+    trend: tuple[TrendBucketResponse, ...]
 
 
 class CounterpartyCreateRequest(BaseModel):

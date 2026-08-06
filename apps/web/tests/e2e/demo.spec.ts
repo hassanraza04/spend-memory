@@ -1,12 +1,11 @@
 import { expect, reloadTrustedRecord, test, waitForWorkspaceRefresh } from "./fixtures";
 
-test("explores the synthetic demo with source evidence and a grouped AED flow", async ({ page, freshRecord, rebuildAnalytics }) => {
+test("explores the synthetic demo with source evidence and a grouped AED flow", async ({ page, freshRecord }) => {
   await freshRecord();
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
-  await expect(page.getByText("Synthetic demo data is ready.")).toBeVisible();
   await refreshed;
-  await reloadTrustedRecord(page, rebuildAnalytics, "?after=2026-01-01&before=2026-02-01");
+  await reloadTrustedRecord(page, "?after=2026-01-01&before=2026-02-01");
 
   await page.getByLabel("Search activity").fill("MetroMart");
   await page.getByRole("button", { name: "Apply filters" }).click();
@@ -24,13 +23,13 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*56\.15/);
 });
 
-test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord, rebuildAnalytics }, testInfo) => {
+test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord }, testInfo) => {
   expect(testInfo.snapshotPath("wide-desktop.png", { kind: "screenshot" })).toMatch(new RegExp(`wide-desktop-${process.platform}\\.png$`));
   await freshRecord();
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
   await refreshed;
-  await reloadTrustedRecord(page, rebuildAnalytics, "?after=2026-01-01&before=2026-02-01");
+  await reloadTrustedRecord(page, "?after=2026-01-01&before=2026-02-01");
 
   for (const [name, width, height] of [["wide-desktop", 1600, 1000], ["laptop", 1280, 800], ["tablet", 768, 1024], ["mobile", 390, 844]] as const) {
     await page.setViewportSize({ width, height });

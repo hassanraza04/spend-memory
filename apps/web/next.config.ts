@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const apiOrigin = process.env.SPEND_MEMORY_API_URL ?? "http://127.0.0.1:8000";
+import { localApiOrigin } from "./src/lib/api-origin";
+
+const apiOrigin = localApiOrigin();
 
 const nextConfig: NextConfig = {
   async rewrites() {

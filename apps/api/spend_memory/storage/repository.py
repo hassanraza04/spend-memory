@@ -36,6 +36,19 @@ class ImportResult:
 
 
 @dataclass(frozen=True)
+class ImportInspection:
+    document_id: UUID
+    run_id: UUID
+    original_filename: str
+    mime_type: str
+    byte_size: int
+    transaction_count: int
+    parser_id: str
+    parser_version: str
+    is_demo: bool
+
+
+@dataclass(frozen=True)
 class ImportLimits:
     max_document_bytes: int = 20 * 1024 * 1024
     max_pdf_pages: int = 20
@@ -432,6 +445,48 @@ class ImportRepository:
                 "UPDATE source_documents SET is_demo = true WHERE document_id = ?",
                 [document_id],
             )
+
+    def inspect_document(self, document_id: UUID) -> ImportInspection | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT documents.document_id, runs.run_id, documents.original_filename,
+                    documents.mime_type, documents.byte_size,
+                    (SELECT count(*) FROM raw_transactions WHERE import_run_id = runs.run_id),
+                    runs.parser_id, runs.parser_version, coalesce(documents.is_demo, false)
+                FROM source_documents AS documents
+                JOIN import_runs AS runs
+                  ON runs.document_id = documents.document_id AND runs.is_active
+                WHERE documents.document_id = ?
+                """,
+                [document_id],
+            ).fetchone()
+        return None if row is None else ImportInspection(*row)
+
+    def read_document_for_reprocess(
+        self, document_id: UUID
+    ) -> tuple[bytes, str, str] | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT storage_filename, sha256_hex, original_filename, mime_type
+                FROM source_documents WHERE document_id = ?
+                """,
+                [document_id],
+            ).fetchone()
+        if row is None:
+            return None
+        storage_filename, document_sha256, filename, mime_type = row
+        path = self.data_directory / storage_filename
+        if Path(storage_filename).name != storage_filename:
+            raise ImportRepositoryError("storage_failed")
+        try:
+            document = path.read_bytes()
+        except OSError:
+            raise ImportRepositoryError("storage_failed") from None
+        if sha256(document).hexdigest() != document_sha256:
+            raise ImportRepositoryError("storage_failed")
+        return document, filename, mime_type
 
     def _import_validated_document(
         self,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from spend_memory.ingestion.registry import ParserRegistry, StatementParserError
 from spend_memory.storage.repository import (
@@ -84,3 +85,17 @@ class IngestionService:
             raise ImportRepositoryError(error.code.value) from None
         finally:
             parser.close()
+
+    def reprocess_document(self, document_id: UUID) -> ImportResult:
+        stored = self.repository.read_document_for_reprocess(document_id)
+        if stored is None:
+            raise ImportRepositoryError("import_not_found")
+        document, filename, mime_type = stored
+        return self.import_document(
+            document=document,
+            filename=filename,
+            declared_mime_type=mime_type,
+        )
+
+    def inspect_document(self, document_id: UUID):
+        return self.repository.inspect_document(document_id)

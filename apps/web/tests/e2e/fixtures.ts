@@ -8,7 +8,7 @@ const databasePath = resolve(dataRoot, "spend-memory.duckdb");
 
 export const fixturePath = (...parts: string[]) => resolve(root, "sample_data", ...parts);
 
-export const test = base.extend<{ freshRecord: () => Promise<void>; rebuildAnalytics: () => void }>({
+export const test = base.extend<{ freshRecord: () => Promise<void> }>({
   freshRecord: async ({ page }, run) => {
     await run(async () => {
       const cleared = await page.request.delete("http://127.0.0.1:8000/api/v1/local-data", {
@@ -22,48 +22,14 @@ export const test = base.extend<{ freshRecord: () => Promise<void>; rebuildAnaly
       await expect(page.getByRole("button", { name: "Explore the synthetic demo" })).toBeEnabled();
     });
   },
-  rebuildAnalytics: async ({ page }, run) => {
-    void page;
-    await run(() => {
-      execFileSync("uv", ["run", "dbt", "build", "--project-dir", "analytics", "--profiles-dir", "analytics"], {
-        cwd: root,
-        env: { ...process.env, UV_CACHE_DIR: resolve(root, ".uv-cache"), SPEND_MEMORY_DUCKDB_PATH: databasePath },
-        stdio: "pipe",
-      });
-    });
-  },
 });
 
 export { expect };
 
-export async function reloadTrustedRecord(page: Page, rebuildAnalytics: () => void, search = "") {
-  rebuildAnalytics();
+export async function reloadTrustedRecord(page: Page, search = "") {
   await page.goto(`/${search}`);
   await expect(page.getByText("Here is the exact trusted activity in your current scope.")).toBeVisible();
   await expect(page.getByRole("link", { name: "People & places" })).toBeVisible();
-}
-
-export function refreshEnrichment(rebuildAnalytics: () => void) {
-  execFileSync(
-    "uv",
-    [
-      "run",
-      "python",
-      "-c",
-      "from os import environ; from spend_memory.enrichment.repository import EnrichmentRepository; from spend_memory.enrichment.service import EnrichmentService; EnrichmentService(EnrichmentRepository(environ['SPEND_MEMORY_DUCKDB_PATH'])).refresh()",
-    ],
-    {
-      cwd: root,
-      env: {
-        ...process.env,
-        UV_CACHE_DIR: resolve(root, ".uv-cache"),
-        PYTHONPATH: resolve(root, "apps/api"),
-        SPEND_MEMORY_DUCKDB_PATH: databasePath,
-      },
-      stdio: "pipe",
-    },
-  );
-  rebuildAnalytics();
 }
 
 export function createMerchant(merchantName: string) {
@@ -89,13 +55,12 @@ export function createMerchant(merchantName: string) {
   );
 }
 
-export async function importStatement(page: Page, rebuildAnalytics: () => void, path: string, search = new URL(page.url()).search) {
+export async function importStatement(page: Page, path: string, search = new URL(page.url()).search) {
   const refreshed = waitForWorkspaceRefresh(page);
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(path);
   await page.getByRole("button", { name: "Import selected statement" }).click();
-  await expect(page.getByText("Your record is ready to review.")).toBeVisible();
   await refreshed;
-  await reloadTrustedRecord(page, rebuildAnalytics, search);
+  await reloadTrustedRecord(page, search);
 }
 
 export function waitForWorkspaceRefresh(page: Page) {

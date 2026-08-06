@@ -32,6 +32,9 @@ class _Counterparties:
         self.counterparty = Counterparty(UUID(int=10), label)
         return self.counterparty
 
+    def list_counterparties(self) -> list[Counterparty]:
+        return [self.counterparty]
+
     def confirm_counterparty_alias(self, descriptor: str, counterparty_id: UUID) -> None:
         self.aliases.append((descriptor, counterparty_id))
 
@@ -97,3 +100,29 @@ def test_counterparty_creation_and_alias_confirmation_are_explicit_actions(
     }
     assert alias.status_code == 200
     assert repository.aliases == [("RINA A.", UUID(int=10))]
+
+
+def test_counterparty_list_and_lens_routes_keep_scope_and_money_typed(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    listed = client.get("/api/v1/counterparties?currency=AED")
+    lens = client.get("/api/v1/counterparties/00000000-0000-0000-0000-000000000009/lens?after=2026-01-01")
+
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "items": [{
+            "counterparty_id": "00000000-0000-0000-0000-000000000009",
+            "label": "Rina",
+            "lens": [{"currency": "AED", "sent_minor": 1200, "received_minor": 200, "net_minor": -1000, "transaction_count": 2}],
+        }],
+        "limit": 50,
+        "offset": 0,
+        "total": 1,
+    }
+    assert lens.status_code == 200
+    assert lens.json() == {
+        "counterparty_id": "00000000-0000-0000-0000-000000000009",
+        "label": "Rina",
+        "lens": [{"currency": "AED", "sent_minor": 0, "received_minor": 200, "net_minor": 200, "transaction_count": 1}],
+        "trend": [{"period_start": "2026-01-01", "currency": "AED", "sent_minor": 0, "received_minor": 200, "net_minor": 200, "transaction_count": 1}],
+    }

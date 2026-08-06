@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Page from "./page";
@@ -22,6 +22,21 @@ describe("home page", () => {
 
     expect(window.location.search).toContain("after=2026-08-01");
     expect(window.location.search).toContain("before=2026-09-01");
+  });
+
+  it("switches to the synthetic demo period after resetting the demo", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string | URL, init?: { method?: string }) => Promise.resolve(new Response(JSON.stringify(
+      init?.method === "POST" && String(url).includes("/demo/reset") ? { status: "reset" } : String(url).includes("/lens") ? { lens: [], trend: [] } : { items: [], total: 0, limit: 50, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+    const demo = screen.getByRole("button", { name: "Explore the synthetic demo" });
+    await waitFor(() => expect(demo).toHaveProperty("disabled", false));
+    fireEvent.click(demo);
+
+    await screen.findByText("Synthetic demo data is ready. Clear it before importing personal data.");
+    expect(window.location.search).toContain("after=2026-01-01");
+    expect(window.location.search).toContain("before=2026-02-01");
   });
 
   it("keeps an empty filtered result in the record instead of returning to first run", async () => {

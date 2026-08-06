@@ -30,6 +30,14 @@ function serverSearch() {
   return "";
 }
 
+function demoIsActive() {
+  try {
+    return window.localStorage?.getItem("spend-memory-demo-workspace") === "true";
+  } catch {
+    return false;
+  }
+}
+
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   const params = new URLSearchParams(useSyncExternalStore(subscribeToNothing, browserSearch, serverSearch));
   const state = workspaceStateFrom(params);
@@ -41,6 +49,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
         <a className="wordmark" href={toWorkspaceHref(state, "this-month")} aria-label="Spend Memory home" onClick={(event) => keepLiveScope(event, "this-month")}>
           <span>Spend</span> Memory
         </a>
+        {typeof window !== "undefined" && demoIsActive() && <p className="demo-label">Synthetic demo</p>}
         <ThemeToggle />
       </header>
       <nav className="section-strip" aria-label="Workspace sections">

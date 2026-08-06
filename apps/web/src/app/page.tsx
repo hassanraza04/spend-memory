@@ -97,11 +97,27 @@ export default function Page() {
     setGroupIds((ids) => ids.includes(transactionId) ? ids.filter((id) => id !== transactionId) : [...ids, transactionId]);
   }
 
+  function showDemoPeriod() {
+    const next = { ...state, after: "2026-01-01", before: "2026-02-01" };
+    window.history.replaceState({}, "", toWorkspaceHref(next, view));
+    setState(next);
+  }
+
+  function leaveDemoWorkspace() {
+    try {
+      window.localStorage.removeItem("spend-memory-demo-workspace");
+    } catch {
+      // Local storage can be unavailable in private browsing.
+    }
+    setHasWorkspace(false);
+    setRevision((value) => value + 1);
+  }
+
   const hasRecord = hasWorkspace === true && transactions !== null && lens !== null;
   const activeSelected = selected ?? (state.selected ? transactions?.items.find((transaction) => transaction.transaction_id === state.selected) ?? null : null);
   return (
     <AppShell>
-      {view === "data" && hasWorkspace !== false ? <DataView scope={apiScope(state)} onDeleted={() => { setHasWorkspace(false); setRevision((value) => value + 1); }} /> : !hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={() => setRevision((value) => value + 1)} /> : <>
+      {view === "data" && hasWorkspace !== false ? <DataView scope={apiScope(state)} onDeleted={leaveDemoWorkspace} /> : !hasRecord ? <FirstRun ready={hasWorkspace !== null} onDemoReady={showDemoPeriod} onReady={() => setRevision((value) => value + 1)} /> : <>
         {view === "this-month" && <MonthOverview lens={lens} state={state} />}
         {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
         {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} loadError={merchantError} />}

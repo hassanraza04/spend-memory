@@ -1,10 +1,10 @@
 import { expect, fixturePath, importStatement, test } from "./fixtures";
 import { readFileSync } from "node:fs";
 
-test("imports and reconciles a synthetic CSV without duplicating a retry", async ({ page, freshRecord, rebuildAnalytics }) => {
+test("imports and reconciles a synthetic CSV without duplicating a retry", async ({ page, freshRecord }) => {
   await freshRecord();
   const csv = fixturePath("source", "aed_january_2026.csv");
-  await importStatement(page, rebuildAnalytics, csv, "?after=2026-01-01&before=2026-02-01");
+  await importStatement(page, csv, "?after=2026-01-01&before=2026-02-01");
   await expect(page.getByText(/17 trusted entries/)).toBeVisible();
 
   const retry = await page.request.post("/api/v1/imports", {

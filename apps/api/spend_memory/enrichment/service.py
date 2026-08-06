@@ -29,6 +29,7 @@ class EnrichmentService:
 
     def refresh(self) -> RefreshResult:
         transactions = self.repository.list_trusted_transactions()
+        self.repository.apply_counterparty_aliases(transactions)
         matches = {
             transaction.raw_transaction_id: self.merchant_resolver.resolve(transaction)
             for transaction in transactions

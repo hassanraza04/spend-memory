@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 
 import { expect, fixturePath, importStatement, test } from "./fixtures";
 
-test("exports the active trusted scope and requires exact local deletion confirmation", async ({ page, freshRecord, rebuildAnalytics }) => {
+test("exports the active trusted scope and requires exact local deletion confirmation", async ({ page, freshRecord }) => {
   await freshRecord();
-  await importStatement(page, rebuildAnalytics, fixturePath("source", "aed_january_2026.csv"), "?after=2026-01-01&before=2026-02-01");
+  await importStatement(page, fixturePath("source", "aed_january_2026.csv"), "?after=2026-01-01&before=2026-02-01");
   await page.getByLabel("Search activity").fill("MetroMart POS");
   await page.getByRole("button", { name: "Apply filters" }).click();
   await page.getByLabel("Group MetroMart POS").check();

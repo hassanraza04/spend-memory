@@ -13,6 +13,7 @@ from spend_memory.ingestion.parsers.synthetic_pdf_a import SyntheticAedTabularPd
 from spend_memory.ingestion.parsers.synthetic_pdf_b import SyntheticPkrCompactPdfParser
 from spend_memory.ingestion.registry import ParserRegistry
 from spend_memory.ingestion.service import IngestionService
+from spend_memory.local_refresh import LocalWorkspaceRefresh
 from spend_memory.storage.repository import ImportRepository
 
 
@@ -24,8 +25,9 @@ class LocalSettings:
 
 
 class LocalDataService:
-    def __init__(self, settings: LocalSettings) -> None:
+    def __init__(self, settings: LocalSettings, refresh: LocalWorkspaceRefresh | None = None) -> None:
         self.settings = settings
+        self.refresh = refresh or LocalWorkspaceRefresh(settings.database_path)
 
     def reset_demo(self) -> None:
         if self.settings.database_path.exists():
@@ -43,6 +45,7 @@ class LocalDataService:
             declared_mime_type="text/csv",
         )
         service.repository.mark_document_as_demo(result.document_id)
+        self.refresh.refresh()
 
     def delete(self) -> None:
         root = _safe_local_path(self.settings.app_data_root, self.settings.app_data_root)
@@ -97,10 +100,16 @@ def get_enrichment_repository(
     return EnrichmentRepository(settings.database_path)
 
 
+def get_local_workspace_refresh(
+    settings: Annotated[LocalSettings, Depends(get_local_settings)],
+) -> LocalWorkspaceRefresh:
+    return LocalWorkspaceRefresh(settings.database_path)
+
+
 def get_local_data_service(
     settings: Annotated[LocalSettings, Depends(get_local_settings)],
 ) -> LocalDataService:
-    return LocalDataService(settings)
+    return LocalDataService(settings, get_local_workspace_refresh(settings))
 
 
 def _safe_local_path(path: Path, root: Path) -> Path:

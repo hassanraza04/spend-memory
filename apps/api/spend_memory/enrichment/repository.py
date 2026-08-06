@@ -167,6 +167,41 @@ class EnrichmentRepository:
             ).fetchone()
         return None if row is None else Counterparty(*row)
 
+    def apply_counterparty_aliases(self, transactions: list[TrustedTransaction]) -> None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            aliases = dict(connection.execute(
+                "SELECT normalized_descriptor, counterparty_id FROM counterparty_aliases"
+            ).fetchall())
+        rows = [
+            [uuid4(), transaction.raw_transaction_id, aliases[transaction.normalized_description]]
+            for transaction in transactions
+            if transaction.normalized_description in aliases
+        ]
+        if not rows:
+            return
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.executemany(
+                """
+                INSERT INTO transaction_counterparty_assignments (
+                    transaction_counterparty_assignment_id, raw_transaction_id, counterparty_id
+                ) VALUES (?, ?, ?)
+                ON CONFLICT (raw_transaction_id) DO UPDATE SET
+                    counterparty_id = excluded.counterparty_id,
+                    confirmed_at = now()
+                """,
+                rows,
+            )
+
+    def list_counterparties(self) -> list[Counterparty]:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            rows = connection.execute(
+                "SELECT counterparty_id, label FROM counterparties ORDER BY label, counterparty_id"
+            ).fetchall()
+        return [Counterparty(*row) for row in rows]
+
     def list_counterparty_transactions(
         self, counterparty_id: UUID
     ) -> list[TrustedTransaction]:

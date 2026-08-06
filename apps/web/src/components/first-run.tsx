@@ -31,7 +31,7 @@ function markDemoWorkspace(isDemo: boolean) {
   }
 }
 
-export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => void; ready?: boolean }> = {}) {
+export function FirstRun({ onReady, onDemoReady, ready = true }: Readonly<{ onReady?: () => void; onDemoReady?: () => void; ready?: boolean }> = {}) {
   const input = useRef<HTMLInputElement>(null);
   const [importState, setImportState] = useState<ImportState>(() => (
     typeof window !== "undefined" && demoWorkspaceIsMarked() ? "demo-ready" : "empty"
@@ -70,6 +70,7 @@ export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => v
       await api.resetDemo();
       markDemoWorkspace(true);
       setImportState("demo-ready");
+      onDemoReady?.();
       onReady?.();
     } catch (error) {
       setImportState(error instanceof ApiClientError && error.code === "non_demo_imports_present" ? "demo-blocked" : "demo-failed");

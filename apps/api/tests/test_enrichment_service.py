@@ -46,3 +46,21 @@ def test_refresh_fails_when_the_trusted_mart_is_unavailable(tmp_path: Path) -> N
 
     with pytest.raises(RuntimeError, match="^trusted_mart_unavailable$"):
         EnrichmentService(repository).refresh()
+
+
+def test_refresh_assigns_matching_trusted_rows_to_confirmed_counterparty_aliases(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions")
+    repository = EnrichmentRepository(database_path)
+    counterparty = repository.create_counterparty("Weekend groceries")
+    repository.confirm_counterparty_alias("METRO MART", counterparty.counterparty_id)
+
+    EnrichmentService(repository).refresh()
+
+    descriptions = [
+        row.description
+        for row in repository.list_counterparty_transactions(counterparty.counterparty_id)
+    ]
+    assert descriptions and set(descriptions) == {"METRO MART", "METRO-MART"}

@@ -4,7 +4,10 @@ from uuid import UUID
 
 from app.main import create_app
 from fastapi.testclient import TestClient
-from spend_memory.api.dependencies import get_enrichment_repository
+from spend_memory.api.dependencies import (
+    get_enrichment_repository,
+    get_local_workspace_refresh,
+)
 from spend_memory.enrichment.models import Category, CurrencyFlow, Merchant
 from spend_memory.enrichment.repository import CategorySummary
 
@@ -77,9 +80,15 @@ class _Entities:
         self.overrides.append((transaction_id, category_id))
 
 
+class _Refresh:
+    def refresh(self) -> None:
+        pass
+
+
 def _client(tmp_path: Path, repository: _Entities) -> TestClient:
     app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
     app.dependency_overrides[get_enrichment_repository] = lambda: repository
+    app.dependency_overrides[get_local_workspace_refresh] = _Refresh
     return TestClient(app)
 
 

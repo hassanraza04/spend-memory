@@ -16,9 +16,13 @@ from spend_memory.api.contracts import (
     ReviewCandidateResponse,
     TransactionCorrectionRequest,
 )
-from spend_memory.api.dependencies import get_enrichment_repository
+from spend_memory.api.dependencies import (
+    get_enrichment_repository,
+    get_local_workspace_refresh,
+)
 from spend_memory.api.errors import ApiError
 from spend_memory.enrichment.repository import EnrichmentRepository
+from spend_memory.local_refresh import LocalRefreshError, LocalWorkspaceRefresh
 
 router = APIRouter()
 
@@ -107,6 +111,7 @@ def correct_merchant(
     merchant_id: UUID,
     correction: MerchantCorrectionRequest,
     repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+    refresh: Annotated[LocalWorkspaceRefresh, Depends(get_local_workspace_refresh)],
 ) -> MutationResponse:
     if repository.get_merchant(merchant_id) is None:
         raise ApiError("merchant_not_found", "The merchant was not found.", 404)
@@ -116,6 +121,14 @@ def correct_merchant(
         repository.confirm_alias(correction.descriptor, merchant_id)
     if correction.category_id is not None:
         repository.assign_merchant_category(merchant_id, correction.category_id)
+    try:
+        refresh.refresh()
+    except LocalRefreshError:
+        raise ApiError(
+            "local_refresh_failed",
+            "The correction was saved, but local activity could not be refreshed.",
+            503,
+        ) from None
     return MutationResponse()
 
 
