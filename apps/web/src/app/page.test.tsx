@@ -4,7 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Page from "./page";
 
 describe("home page", () => {
-  beforeEach(() => window.history.replaceState({}, "", "/"));
+  const storage = new Map<string, string>();
+
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/");
+    storage.clear();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+  });
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it("opens with the monthly question and the first-run choices", () => {
@@ -35,6 +48,19 @@ describe("home page", () => {
     fireEvent.click(demo);
 
     await screen.findByText("Synthetic demo data is ready. Clear it before importing personal data.");
+    expect(window.location.search).toContain("after=2026-01-01");
+    expect(window.location.search).toContain("before=2026-02-01");
+  });
+
+  it("restores the synthetic demo period when a marked demo workspace reloads", async () => {
+    window.localStorage.setItem("spend-memory-demo-workspace", "true");
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("limit=1") ? { items: [{}], total: 1, limit: 1, offset: 0 } : { items: [], total: 0, limit: 50, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    await screen.findByText("Here is the exact trusted activity in your current scope.");
     expect(window.location.search).toContain("after=2026-01-01");
     expect(window.location.search).toContain("before=2026-02-01");
   });

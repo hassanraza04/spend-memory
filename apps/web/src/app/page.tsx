@@ -17,6 +17,19 @@ import { ApiClient, localErrorMessage, type Category, type MerchantEvidence, typ
 import { mergeWorkspaceState, toWorkspaceHref, withDefaultMonthRange, workspaceStateFrom, workspaceViewFrom, type WorkspaceState } from "../lib/url-state";
 
 const api = new ApiClient();
+const demoWorkspaceKey = "spend-memory-demo-workspace";
+
+function initialWorkspaceState(): WorkspaceState {
+  const state = workspaceStateFrom(new URLSearchParams(window.location.search));
+  try {
+    if (!state.after && !state.before && window.localStorage?.getItem(demoWorkspaceKey) === "true") {
+      return { ...state, after: "2026-01-01", before: "2026-02-01" };
+    }
+  } catch {
+    // Local storage can be unavailable in private browsing.
+  }
+  return withDefaultMonthRange(state);
+}
 
 function apiScope(state: WorkspaceState): Record<string, string | undefined> {
   return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset };
@@ -31,7 +44,7 @@ function comparisonScope(state: WorkspaceState): Record<string, string | undefin
 }
 
 export default function Page() {
-  const [state, setState] = useState<WorkspaceState>(() => typeof window === "undefined" ? {} : withDefaultMonthRange(workspaceStateFrom(new URLSearchParams(window.location.search))));
+  const [state, setState] = useState<WorkspaceState>(() => typeof window === "undefined" ? {} : initialWorkspaceState());
   const [transactions, setTransactions] = useState<ApiPage<Transaction> | null>(null);
   const [lens, setLens] = useState<WorkspaceLens | null>(null);
   const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null);
@@ -105,7 +118,7 @@ export default function Page() {
 
   function leaveDemoWorkspace() {
     try {
-      window.localStorage.removeItem("spend-memory-demo-workspace");
+      window.localStorage.removeItem(demoWorkspaceKey);
     } catch {
       // Local storage can be unavailable in private browsing.
     }

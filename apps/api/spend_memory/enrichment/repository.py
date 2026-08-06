@@ -188,9 +188,7 @@ class EnrichmentRepository:
                 INSERT INTO transaction_counterparty_assignments (
                     transaction_counterparty_assignment_id, raw_transaction_id, counterparty_id
                 ) VALUES (?, ?, ?)
-                ON CONFLICT (raw_transaction_id) DO UPDATE SET
-                    counterparty_id = excluded.counterparty_id,
-                    confirmed_at = now()
+                ON CONFLICT (raw_transaction_id) DO NOTHING
                 """,
                 rows,
             )
