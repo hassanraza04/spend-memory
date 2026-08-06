@@ -17,5 +17,6 @@ test("imports and reconciles a synthetic CSV without duplicating a retry", async
 test("imports the scanned synthetic PDF through the OCR-capable local path", async ({ page, freshRecord }) => {
   await freshRecord();
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(fixturePath("source", "aed_statement_image_only.pdf"));
+  await page.getByRole("button", { name: "Import selected statement" }).click();
   await expect(page.getByText("Your record is ready to review.")).toBeVisible();
 });

@@ -3,6 +3,8 @@ export type ImportResult = {
   run_id: string;
   transaction_count: number;
   was_already_imported: boolean;
+  parser_id: string;
+  parser_version: string;
 };
 
 export type LocalDataResult = { status: "deleted" | "reset" };

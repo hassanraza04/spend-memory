@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 
 import { ApiClient, ApiClientError } from "../lib/api";
+import { ParserDebug, parserDebugFor } from "./parser-debug";
 
 type ImportState = "empty" | "loading" | "unsupported" | "partial" | "failed" | "ready" | "demo-loading" | "demo-ready" | "demo-blocked" | "demo-failed" | "clearing-demo" | "clear-failed";
 
@@ -35,6 +36,8 @@ export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => v
   const [importState, setImportState] = useState<ImportState>(() => (
     typeof window !== "undefined" && demoWorkspaceIsMarked() ? "demo-ready" : "empty"
   ));
+  const [selectedFile, setSelectedFile] = useState<File>();
+  const [debugRows, setDebugRows] = useState<{ description: string; sourceRow: number }[]>([]);
   const demoIsActive = ["demo-ready", "clearing-demo", "clear-failed"].includes(importState);
 
   async function importFile(file: File) {
@@ -50,6 +53,15 @@ export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => v
     } catch {
       setImportState("failed");
     }
+  }
+
+  async function chooseFile(file: File) {
+    if (!supported(file)) {
+      setImportState("unsupported");
+      return;
+    }
+    setSelectedFile(file);
+    setDebugRows(await parserDebugFor(file));
   }
 
   async function startDemo() {
@@ -104,10 +116,16 @@ export function FirstRun({ onReady, ready = true }: Readonly<{ onReady?: () => v
                 aria-label="Choose a CSV or PDF"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) void importFile(file);
+                  if (file) void chooseFile(file);
                   event.currentTarget.value = "";
                 }}
               />
+              {selectedFile && <>
+                <ParserDebug rows={debugRows} />
+                <button className="button primary" type="button" onClick={() => void importFile(selectedFile)}>
+                  Import selected statement
+                </button>
+              </>}
             </>
           )}
         </article>

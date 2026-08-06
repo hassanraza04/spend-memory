@@ -17,7 +17,13 @@ from typing import Any
 import fitz
 
 from spend_memory.ingestion import resource_limits
-from spend_memory.ingestion.base import ParsedRawTransaction, StatementParser
+from spend_memory.ingestion.base import (
+    ParsedRawTransaction,
+    ParserCapabilities,
+    StatementParser,
+)
+
+_LEGACY_CAPABILITIES = ParserCapabilities(True, False, False, False, False)
 
 
 class ParserErrorCode(str, Enum):
@@ -61,7 +67,9 @@ class ParserRegistry:
         _raise_if_encrypted_pdf(document, filename)
         try:
             candidates = [
-                (parser.can_parse(document, filename), parser) for parser in self._parsers
+                (parser.can_parse(document, filename), parser)
+                for parser in self._parsers
+                if not getattr(parser, "capabilities", _LEGACY_CAPABILITIES).experimental
             ]
         except StatementParserError:
             raise

@@ -31,6 +31,8 @@ class ImportResult:
     run_id: UUID
     transaction_count: int
     was_already_imported: bool
+    parser_id: str
+    parser_version: str
 
 
 @dataclass(frozen=True)
@@ -330,6 +332,8 @@ class ImportRepository:
                 run_id=existing[1],
                 transaction_count=existing[2],
                 was_already_imported=True,
+                parser_id=parser_id,
+                parser_version=parser_version,
             )
 
     def record_isolated_parse_error(
@@ -482,6 +486,8 @@ class ImportRepository:
                 run_id=existing[1],
                 transaction_count=existing[2],
                 was_already_imported=True,
+                parser_id=parser_id,
+                parser_version=parser_version,
             )
 
         document_id = uuid4()
@@ -640,6 +646,8 @@ class ImportRepository:
             run_id=run_id,
             transaction_count=len(transactions),
             was_already_imported=False,
+            parser_id=parser_id,
+            parser_version=parser_version,
         )
 
     def _stage_document(self, document: bytes, document_sha256: str) -> Path:

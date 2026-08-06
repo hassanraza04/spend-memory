@@ -5,7 +5,7 @@ from datetime import date
 
 import fitz
 
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 from spend_memory.ingestion.ocr import (
     OcrError,
     OcrErrorCode,
@@ -23,6 +23,7 @@ _IMAGE_ONLY_FIXTURE_NAME = "aed_statement_image_only.pdf"
 class SyntheticAedTabularPdfParser:
     parser_id = "synthetic-aed-tabular-pdf"
     version = "1.2"
+    capabilities = ParserCapabilities(True, True, False, True, True)
 
     def can_parse(self, document: bytes, filename: str) -> float:
         if not filename.lower().endswith(".pdf"):

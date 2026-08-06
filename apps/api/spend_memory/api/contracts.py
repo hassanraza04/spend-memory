@@ -164,6 +164,8 @@ class ImportResponse(BaseModel):
     run_id: UUID
     transaction_count: int
     was_already_imported: bool
+    parser_id: str
+    parser_version: str
 
 
 class CounterpartyAssignmentRequest(BaseModel):

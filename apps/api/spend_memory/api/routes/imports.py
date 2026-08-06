@@ -40,4 +40,6 @@ async def import_document(
         run_id=result.run_id,
         transaction_count=result.transaction_count,
         was_already_imported=result.was_already_imported,
+        parser_id=result.parser_id,
+        parser_version=result.parser_version,
     )

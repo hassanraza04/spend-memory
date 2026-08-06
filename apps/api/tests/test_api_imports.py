@@ -15,7 +15,9 @@ class _Imports:
         self.calls.append(kwargs)
         if kwargs["document"] == b"large":
             raise ImportRepositoryError("document_too_large")
-        return ImportResult(UUID(int=1), UUID(int=2), 1, len(self.calls) > 1)
+        return ImportResult(
+            UUID(int=1), UUID(int=2), 1, len(self.calls) > 1, "canonical-csv", "1.1"
+        )
 
 
 def _client(tmp_path: Path, service: _Imports) -> TestClient:
@@ -37,6 +39,8 @@ def test_imports_only_forward_upload_bytes_filename_and_mime_type(tmp_path: Path
         "run_id": "00000000-0000-0000-0000-000000000002",
         "transaction_count": 1,
         "was_already_imported": False,
+        "parser_id": "canonical-csv",
+        "parser_version": "1.1",
     }
     assert service.calls == [
         {

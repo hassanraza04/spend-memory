@@ -50,6 +50,22 @@ describe("FirstRun", () => {
     expect(screen.getByText("Choose a CSV or PDF statement.")).toBeTruthy();
   });
 
+  it("shows detected synthetic CSV rows and warnings before importing", async () => {
+    render(<FirstRun />);
+
+    fireEvent.change(screen.getByLabelText("Choose a CSV or PDF"), {
+      target: { files: [new File([
+        "transaction_id,posted_date,account_id,currency,amount_minor,description,transaction_type\nSYN-00001,2026-01-01,AED-SYNTH-001,AED,-1200,Synthetic lunch,debit\n",
+      ], "statement.csv", { type: "text/csv" })] },
+    });
+
+    expect(await screen.findByRole("heading", { name: "Preview before import" })).toBeTruthy();
+    expect(await screen.findByText("Synthetic lunch")).toBeTruthy();
+    expect(screen.getByText("Source row 2")).toBeTruthy();
+    expect(screen.getByText("Preview only. Import validates this file again and never corrects rows automatically.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import selected statement" })).toBeTruthy();
+  });
+
   it("describes a partial import without guessing a completion percentage", async () => {
     vi.stubGlobal(
       "fetch",
@@ -70,6 +86,7 @@ describe("FirstRun", () => {
     fireEvent.change(screen.getByLabelText("Choose a CSV or PDF"), {
       target: { files: [new File(["date,amount"], "statement.csv", { type: "text/csv" })] },
     });
+    fireEvent.click(await screen.findByRole("button", { name: "Import selected statement" }));
 
     expect(await screen.findByText("The statement was read, but no transactions could be reconciled.")).toBeTruthy();
   });
@@ -81,6 +98,7 @@ describe("FirstRun", () => {
     fireEvent.change(screen.getByLabelText("Choose a CSV or PDF"), {
       target: { files: [new File(["date,amount"], "statement.csv", { type: "text/csv" })] },
     });
+    fireEvent.click(await screen.findByRole("button", { name: "Import selected statement" }));
 
     expect(await screen.findByText("We could not import that statement. Try another supported file.")).toBeTruthy();
   });

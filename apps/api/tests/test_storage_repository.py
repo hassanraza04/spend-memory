@@ -693,6 +693,8 @@ def test_same_document_and_parser_version_is_idempotent(tmp_path: Path) -> None:
         run_id=first.run_id,
         transaction_count=1,
         was_already_imported=True,
+        parser_id="stub-parser",
+        parser_version="1.0",
     )
     assert parser.parse_calls == 1
     assert counts == (1, 1, 1)

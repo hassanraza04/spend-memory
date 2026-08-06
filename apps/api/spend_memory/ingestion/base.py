@@ -5,6 +5,16 @@ from typing import Protocol
 
 
 @dataclass(frozen=True)
+class ParserCapabilities:
+    text_extraction: bool
+    requires_ocr: bool
+    supports_balance: bool
+    discovers_currency: bool
+    reports_confidence: bool
+    experimental: bool = False
+
+
+@dataclass(frozen=True)
 class ParsedRawTransaction:
     """A source-faithful transaction extracted before persistence assigns IDs."""
 
@@ -32,6 +42,7 @@ class StatementParser(Protocol):
 
     parser_id: str
     version: str
+    capabilities: ParserCapabilities
 
     def can_parse(self, document: bytes, filename: str) -> float: ...
 
