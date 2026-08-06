@@ -56,17 +56,22 @@ export function createMerchant(merchantName: string) {
 }
 
 export async function importStatement(page: Page, path: string, search = new URL(page.url()).search) {
-  const refreshed = waitForWorkspaceRefresh(page);
+  const imported = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/v1/imports"
+  ));
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(path);
   await page.getByRole("button", { name: "Import selected statement" }).click();
-  await refreshed;
+  expect((await imported).ok()).toBe(true);
   await reloadTrustedRecord(page, search);
 }
 
-export function waitForWorkspaceRefresh(page: Page) {
-  return Promise.all([
-    page.waitForResponse((response) => response.url().includes("/api/v1/lens?")),
-    page.waitForResponse((response) => response.url().includes("/api/v1/transactions?") && !response.url().includes("limit=1")),
-    page.waitForResponse((response) => response.url().includes("/api/v1/transactions?limit=1")),
-  ]);
+export async function resetDemo(page: Page, search = "?after=2026-01-01&before=2026-02-01") {
+  const reset = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/v1/demo/reset"
+  ));
+  await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
+  expect((await reset).ok()).toBe(true);
+  await reloadTrustedRecord(page, search);
 }
