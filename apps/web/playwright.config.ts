@@ -26,7 +26,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: "ignore",
-      stderr: "pipe",
+      stderr: "ignore",
     },
     {
       command: "pnpm --dir apps/web build && pnpm --dir apps/web start",
