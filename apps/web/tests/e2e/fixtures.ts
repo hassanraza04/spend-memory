@@ -26,10 +26,14 @@ export const test = base.extend<{ freshRecord: () => Promise<void> }>({
 
 export { expect };
 
-export async function reloadTrustedRecord(page: Page, search = "") {
-  await page.goto(`/${search}`);
+async function waitForTrustedActivity(page: Page) {
   await expect(page.getByText("Here is the exact trusted activity in your current scope.")).toBeVisible();
   await expect(page.getByRole("link", { name: "People & places" })).toBeVisible();
+}
+
+export async function reloadTrustedRecord(page: Page, search = "") {
+  await page.goto(`/${search}`);
+  await waitForTrustedActivity(page);
 }
 
 export function createMerchant(merchantName: string) {
@@ -56,6 +60,8 @@ export function createMerchant(merchantName: string) {
 }
 
 export async function importStatement(page: Page, path: string, search = new URL(page.url()).search) {
+  await page.goto(`/${search}`);
+  await expect(page.getByRole("button", { name: "Import a statement" })).toBeEnabled();
   const imported = page.waitForResponse((response) => (
     response.request().method() === "POST"
     && new URL(response.url()).pathname === "/api/v1/imports"
@@ -63,15 +69,17 @@ export async function importStatement(page: Page, path: string, search = new URL
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(path);
   await page.getByRole("button", { name: "Import selected statement" }).click();
   expect((await imported).ok()).toBe(true);
-  await reloadTrustedRecord(page, search);
+  await waitForTrustedActivity(page);
 }
 
 export async function resetDemo(page: Page, search = "?after=2026-01-01&before=2026-02-01") {
+  await page.goto(`/${search}`);
+  await expect(page.getByRole("button", { name: "Explore the synthetic demo" })).toBeEnabled();
   const reset = page.waitForResponse((response) => (
     response.request().method() === "POST"
     && new URL(response.url()).pathname === "/api/v1/demo/reset"
   ));
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
   expect((await reset).ok()).toBe(true);
-  await reloadTrustedRecord(page, search);
+  await waitForTrustedActivity(page);
 }

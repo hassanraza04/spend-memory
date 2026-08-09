@@ -1,3 +1,4 @@
+from asyncio import Lock
 from pathlib import Path
 
 import uvicorn
@@ -21,6 +22,13 @@ LOCAL_API_PORT = 8000
 def create_app(database_path: Path, data_directory: Path) -> FastAPI:
     app = FastAPI(title="Spend Memory API")
     app.state.settings = LocalSettings(database_path, data_directory, data_directory.parent)
+    app.state.database_request_lock = Lock()
+
+    @app.middleware("http")
+    async def serialize_local_database_access(request, call_next):
+        async with app.state.database_request_lock:
+            return await call_next(request)
+
     app.include_router(legacy_router)
     app.include_router(router)
     app.add_exception_handler(ApiError, api_error_handler)

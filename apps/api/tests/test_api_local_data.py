@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event, Thread
 
 import duckdb
 from app.main import create_app
@@ -8,6 +9,7 @@ from spend_memory.api.dependencies import (
     LocalSettings,
     get_local_data_service,
 )
+from spend_memory.storage.repository import database_write_lock
 
 
 class _LocalData:
@@ -105,6 +107,35 @@ def test_local_data_deletion_requires_the_exact_confirmation(tmp_path: Path) -> 
     assert accepted.status_code == 200
     assert accepted.json() == {"status": "deleted"}
     assert service.deleted is True
+
+
+def test_local_deletion_waits_for_an_active_database_writer(tmp_path: Path) -> None:
+    database_path = tmp_path / "spend-memory.duckdb"
+    service = LocalDataService(LocalSettings(database_path, tmp_path / "data", tmp_path))
+    writer_started = Event()
+    release_writer = Event()
+    deletion_finished = Event()
+
+    def hold_writer() -> None:
+        with database_write_lock(database_path):
+            writer_started.set()
+            release_writer.wait()
+
+    writer = Thread(target=hold_writer)
+    writer.start()
+    assert writer_started.wait(1)
+
+    deleter = Thread(target=lambda: (service.delete(), deletion_finished.set()))
+    deleter.start()
+    try:
+        assert not deletion_finished.wait(0.1)
+    finally:
+        release_writer.set()
+        writer.join()
+        deleter.join()
+
+    assert deletion_finished.is_set()
+    assert database_path.with_name(f".{database_path.name}.write.lock").exists()
 
 
 def test_local_deletion_rejects_outside_or_symlinked_data_paths(tmp_path: Path) -> None:

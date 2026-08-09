@@ -24,6 +24,8 @@ test("keeps the personal record readable at each supported viewport", async ({ p
   expect(testInfo.snapshotPath("wide-desktop.png", { kind: "screenshot" })).toMatch(new RegExp(`wide-desktop-${process.platform}\\.png$`));
   await freshRecord();
   await resetDemo(page);
+  await expect(page.getByText("Synthetic demo")).toBeVisible();
+  await page.locator(".demo-label").evaluate((element) => element.remove());
 
   for (const [name, width, height] of [["wide-desktop", 1600, 1000], ["laptop", 1280, 800], ["tablet", 768, 1024], ["mobile", 390, 844]] as const) {
     await page.setViewportSize({ width, height });

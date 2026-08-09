@@ -14,7 +14,7 @@ from spend_memory.ingestion.parsers.synthetic_pdf_b import SyntheticPkrCompactPd
 from spend_memory.ingestion.registry import ParserRegistry
 from spend_memory.ingestion.service import IngestionService
 from spend_memory.local_refresh import LocalWorkspaceRefresh
-from spend_memory.storage.repository import ImportRepository
+from spend_memory.storage.repository import ImportRepository, database_write_lock
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,14 +51,12 @@ class LocalDataService:
         root = _safe_local_path(self.settings.app_data_root, self.settings.app_data_root)
         data_directory = _safe_local_path(self.settings.data_directory, root)
         database_path = _safe_local_path(self.settings.database_path, root)
-        if data_directory == root:
-            raise ValueError("unsafe_local_data_path")
-        if data_directory.exists():
-            rmtree(data_directory)
-        database_path.unlink(missing_ok=True)
-        database_path.with_name(
-            f".{database_path.name}.write.lock"
-        ).unlink(missing_ok=True)
+        with database_write_lock(database_path):
+            if data_directory == root:
+                raise ValueError("unsafe_local_data_path")
+            if data_directory.exists():
+                rmtree(data_directory)
+            database_path.unlink(missing_ok=True)
 
 
 def load_local_settings() -> LocalSettings:
