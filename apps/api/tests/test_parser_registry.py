@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import fitz
 import pytest
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 from spend_memory.ingestion.registry import (
     ParserErrorCode,
     ParserRegistry,
@@ -13,6 +13,8 @@ from spend_memory.ingestion.registry import (
 
 
 class _Parser:
+    capabilities = ParserCapabilities(True, False, False, True, True)
+
     def __init__(self, parser_id: str, confidence: float) -> None:
         self.parser_id = parser_id
         self.version = "1.0"
@@ -20,6 +22,17 @@ class _Parser:
 
     def can_parse(self, document: bytes, filename: str) -> float:
         return self._confidence
+
+    def parse(self, document: bytes) -> list[ParsedRawTransaction]:
+        return []
+
+
+class _UnmarkedParser:
+    parser_id = "unmarked"
+    version = "1.0"
+
+    def can_parse(self, document: bytes, filename: str) -> float:
+        return 1.0
 
     def parse(self, document: bytes) -> list[ParsedRawTransaction]:
         return []
@@ -58,6 +71,15 @@ def test_registry_rejects_unsupported_files() -> None:
 
     with pytest.raises(StatementParserError) as caught:
         registry._select_for_isolated_worker(b"unknown", "unknown.bin")
+
+    assert caught.value.code is ParserErrorCode.UNSUPPORTED
+
+
+def test_registry_rejects_a_parser_without_capability_metadata() -> None:
+    registry = ParserRegistry([_UnmarkedParser()])
+
+    with pytest.raises(StatementParserError) as caught:
+        registry._select_for_isolated_worker(b"statement", "statement.csv")
 
     assert caught.value.code is ParserErrorCode.UNSUPPORTED
 

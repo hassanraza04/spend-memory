@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import duckdb
 
+from spend_memory.enrichment.counterparties import summarize_lens
 from spend_memory.enrichment.models import (
     Category,
+    CategoryDecision,
+    Counterparty,
+    CurrencyFlow,
     DuplicateCandidate,
     Merchant,
     MerchantMatch,
@@ -17,10 +23,52 @@ from spend_memory.enrichment.models import (
     UnusualSpendCandidate,
 )
 from spend_memory.enrichment.normalization import normalize_descriptor
+from spend_memory.enrichment.periods import PeriodRow
+from spend_memory.enrichment.search import SearchRow
 from spend_memory.storage.repository import apply_migrations, database_write_lock
 
 if TYPE_CHECKING:
     from spend_memory.enrichment.service import RefreshResult
+
+
+@dataclass(frozen=True)
+class MerchantEvidence:
+    transaction_id: UUID
+    merchant_id: UUID | None
+    merchant_name: str | None
+    status: str
+    confidence: float
+    method: str
+    evidence: dict[str, str | int | float]
+
+
+@dataclass(frozen=True)
+class RecurringEvidence:
+    candidate_id: UUID
+    label: str
+    cadence: str
+    status: str
+    confidence: float
+    evidence: dict[str, str | int | float]
+    transaction_ids: tuple[UUID, ...]
+    expected_next_start: date
+    expected_next_end: date
+
+
+@dataclass(frozen=True)
+class CategorySummary:
+    category: Category
+    lens: tuple[CurrencyFlow, ...]
+
+
+@dataclass(frozen=True)
+class ReviewEvidence:
+    candidate_id: UUID
+    kind: str
+    status: str
+    confidence: float
+    evidence: dict[str, str | int | float]
+    transaction_ids: tuple[UUID, ...]
 
 
 class EnrichmentRepository:
@@ -35,6 +83,226 @@ class EnrichmentRepository:
             [merchant.merchant_id, merchant.merchant_name],
         )
         return merchant
+
+    def get_merchant(self, merchant_id: UUID) -> Merchant | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                "SELECT merchant_id, merchant_name FROM merchants WHERE merchant_id = ?",
+                [merchant_id],
+            ).fetchone()
+        return None if row is None else Merchant(*row)
+
+    def create_counterparty(self, label: str) -> Counterparty:
+        counterparty = Counterparty(uuid4(), _required_text(label, "label"))
+        self._write(
+            "INSERT INTO counterparties (counterparty_id, label) VALUES (?, ?)",
+            [counterparty.counterparty_id, counterparty.label],
+        )
+        return counterparty
+
+    def confirm_counterparty_alias(self, descriptor: str, counterparty_id: UUID) -> None:
+        self._write(
+            """
+            INSERT INTO counterparty_aliases (
+                counterparty_alias_id, normalized_descriptor, counterparty_id
+            ) VALUES (?, ?, ?)
+            ON CONFLICT (normalized_descriptor) DO UPDATE SET
+                counterparty_id = excluded.counterparty_id,
+                confirmed_at = now()
+            """,
+            [uuid4(), _normalized_descriptor(descriptor), counterparty_id],
+        )
+
+    def assign_counterparty_transactions(
+        self, counterparty_id: UUID, raw_transaction_ids: list[UUID]
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                for raw_transaction_id in raw_transaction_ids:
+                    trusted = connection.execute(
+                        """
+                        SELECT 1 FROM analytics.mart_transactions
+                        WHERE raw_transaction_id = ?
+                        """,
+                        [raw_transaction_id],
+                    ).fetchone()
+                    if trusted is None:
+                        raise ValueError("trusted_transaction_required")
+                if raw_transaction_ids:
+                    connection.executemany(
+                        """
+                        INSERT INTO transaction_counterparty_assignments (
+                            transaction_counterparty_assignment_id,
+                            raw_transaction_id,
+                            counterparty_id
+                        ) VALUES (?, ?, ?)
+                        ON CONFLICT (raw_transaction_id) DO UPDATE SET
+                            counterparty_id = excluded.counterparty_id,
+                            confirmed_at = now()
+                        """,
+                        [
+                            [uuid4(), raw_transaction_id, counterparty_id]
+                            for raw_transaction_id in raw_transaction_ids
+                        ],
+                    )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
+    def find_counterparty(self, descriptor: str) -> Counterparty | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT counterparties.counterparty_id, counterparties.label
+                FROM counterparty_aliases
+                JOIN counterparties USING (counterparty_id)
+                WHERE normalized_descriptor = ?
+                """,
+                [_normalized_descriptor(descriptor)],
+            ).fetchone()
+        return None if row is None else Counterparty(*row)
+
+    def apply_counterparty_aliases(self, transactions: list[TrustedTransaction]) -> None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            aliases = dict(connection.execute(
+                "SELECT normalized_descriptor, counterparty_id FROM counterparty_aliases"
+            ).fetchall())
+        rows = [
+            [uuid4(), transaction.raw_transaction_id, aliases[transaction.normalized_description]]
+            for transaction in transactions
+            if transaction.normalized_description in aliases
+        ]
+        if not rows:
+            return
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.executemany(
+                """
+                INSERT INTO transaction_counterparty_assignments (
+                    transaction_counterparty_assignment_id, raw_transaction_id, counterparty_id
+                ) VALUES (?, ?, ?)
+                ON CONFLICT (raw_transaction_id) DO NOTHING
+                """,
+                rows,
+            )
+
+    def list_counterparties(self) -> list[Counterparty]:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            rows = connection.execute(
+                "SELECT counterparty_id, label FROM counterparties ORDER BY label, counterparty_id"
+            ).fetchall()
+        return [Counterparty(*row) for row in rows]
+
+    def list_counterparty_transactions(
+        self, counterparty_id: UUID
+    ) -> list[TrustedTransaction]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT transactions.raw_transaction_id, transactions.account_identity,
+                        transactions.transaction_date, transactions.description,
+                        transactions.currency, transactions.amount_minor,
+                        transactions.direction
+                    FROM analytics.mart_transactions AS transactions
+                    JOIN transaction_counterparty_assignments AS assignments
+                        USING (raw_transaction_id)
+                    WHERE assignments.counterparty_id = ?
+                    ORDER BY transactions.transaction_date, transactions.raw_transaction_id
+                    """,
+                    [counterparty_id],
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            TrustedTransaction(
+                raw_transaction_id=raw_transaction_id,
+                account_identity=account_identity,
+                transaction_date=transaction_date,
+                description=description,
+                normalized_description=normalize_descriptor(description),
+                currency=currency,
+                amount_minor=amount_minor,
+                direction=direction,
+            )
+            for (
+                raw_transaction_id,
+                account_identity,
+                transaction_date,
+                description,
+                currency,
+                amount_minor,
+                direction,
+            ) in rows
+        ]
+
+    def get_counterparty(self, counterparty_id: UUID) -> Counterparty | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                "SELECT counterparty_id, label FROM counterparties WHERE counterparty_id = ?",
+                [counterparty_id],
+            ).fetchone()
+        return None if row is None else Counterparty(*row)
+
+    def list_search_rows(self) -> list[SearchRow]:
+        try:
+            with duckdb.connect(str(self.database_path)) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT transactions.raw_transaction_id, transactions.account_identity,
+                        transactions.transaction_date, transactions.description,
+                        transactions.currency, transactions.amount_minor,
+                        transactions.direction, transactions.category_id,
+                        coalesce(categories.category_label, 'uncategorized'),
+                        merchants.merchant_name,
+                        coalesce(annotations.resolution_status, 'unresolved'),
+                        transactions.original_filename, transactions.source_ordinal,
+                        transactions.source_page, transactions.source_row,
+                        transactions.source_text, transactions.extraction_confidence,
+                        counterparties.label
+                    FROM analytics.mart_transactions AS transactions
+                    LEFT JOIN categories ON transactions.category_id = categories.category_id
+                    LEFT JOIN merchants ON transactions.merchant_id = merchants.merchant_id
+                    LEFT JOIN transaction_merchant_annotations AS annotations
+                        ON transactions.raw_transaction_id = annotations.raw_transaction_id
+                    LEFT JOIN transaction_counterparty_assignments AS assignments
+                        ON transactions.raw_transaction_id = assignments.raw_transaction_id
+                    LEFT JOIN counterparties ON assignments.counterparty_id = counterparties.counterparty_id
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            SearchRow(
+                transaction=TrustedTransaction(
+                    raw_transaction_id, account_identity, transaction_date, description,
+                    normalize_descriptor(description), currency, amount_minor, direction,
+                ),
+                category=CategoryDecision(category_id, category_label, "confirmed" if category_id else "unavailable"),
+                merchant_name=merchant_name,
+                state=state,
+                source_document=source_document,
+                source_ordinal=source_ordinal,
+                source_page=source_page,
+                source_row=source_row,
+                source_text=source_text,
+                extraction_confidence=extraction_confidence,
+                counterparty_label=counterparty_label,
+            )
+            for (
+                raw_transaction_id, account_identity, transaction_date, description, currency,
+                amount_minor, direction, category_id, category_label, merchant_name, state,
+                source_document, source_ordinal, source_page, source_row, source_text,
+                extraction_confidence, counterparty_label,
+            ) in rows
+        ]
 
     def confirm_alias(self, descriptor: str, merchant_id: UUID) -> None:
         self._write(
@@ -102,6 +370,36 @@ class EnrichmentRepository:
         )
         return category
 
+    def get_category(self, category_id: UUID) -> Category | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                "SELECT category_id, category_label FROM categories WHERE category_id = ?",
+                [category_id],
+            ).fetchone()
+        return None if row is None else Category(*row)
+
+    def list_categories(self) -> list[Category]:
+        with duckdb.connect(str(self.database_path)) as connection:
+            rows = connection.execute(
+                "SELECT category_id, category_label FROM categories ORDER BY category_label, category_id"
+            ).fetchall()
+        return [Category(*row) for row in rows]
+
+    def list_category_summaries(self, currency: str | None = None) -> list[CategorySummary]:
+        rows = self.list_search_rows()
+        return [
+            CategorySummary(
+                category,
+                summarize_lens(
+                    row.transaction
+                    for row in rows
+                    if row.category.category_id == category.category_id
+                    and (currency is None or row.transaction.currency == currency)
+                ),
+            )
+            for category in self.list_categories()
+        ]
+
     def assign_merchant_category(self, merchant_id: UUID, category_id: UUID) -> None:
         self._write(
             """
@@ -138,6 +436,34 @@ class EnrichmentRepository:
             """,
             [raw_transaction_id, category_id],
         )
+
+    def set_trusted_transaction_category_override(
+        self, raw_transaction_id: UUID, category_id: UUID
+    ) -> None:
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                if connection.execute(
+                    "SELECT 1 FROM analytics.mart_transactions WHERE raw_transaction_id = ?",
+                    [raw_transaction_id],
+                ).fetchone() is None:
+                    raise ValueError("trusted_transaction_required")
+                connection.execute(
+                    """
+                    INSERT INTO transaction_category_overrides (raw_transaction_id, category_id)
+                    VALUES (?, ?)
+                    ON CONFLICT (raw_transaction_id) DO UPDATE SET
+                        category_id = excluded.category_id, confirmed_at = now()
+                    """,
+                    [raw_transaction_id, category_id],
+                )
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
 
     def find_transaction_category_override(
         self, raw_transaction_id: UUID
@@ -488,6 +814,160 @@ class EnrichmentRepository:
             duplicate_candidate_count=duplicate_count,
             unusual_spend_candidate_count=unusual_count,
         )
+
+    def list_merchant_evidence(self) -> list[MerchantEvidence]:
+        try:
+            with duckdb.connect(str(self.database_path)) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT transactions.raw_transaction_id, annotations.merchant_id AS merchant_id,
+                        merchants.merchant_name, annotations.resolution_status,
+                        annotations.confidence, annotations.method, annotations.evidence_json
+                    FROM analytics.mart_transactions AS transactions
+                    JOIN transaction_merchant_annotations AS annotations
+                        USING (raw_transaction_id)
+                    LEFT JOIN merchants
+                        ON merchants.merchant_id = annotations.merchant_id
+                    ORDER BY transactions.transaction_date, transactions.raw_transaction_id
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            MerchantEvidence(
+                transaction_id, merchant_id, merchant_name, status, confidence, method,
+                json.loads(evidence),
+            )
+            for transaction_id, merchant_id, merchant_name, status, confidence, method, evidence in rows
+        ]
+
+    def list_recurring_evidence(self) -> list[RecurringEvidence]:
+        try:
+            with duckdb.connect(str(self.database_path)) as connection:
+                candidates = connection.execute(
+                    """
+                    SELECT candidates.recurring_candidate_id, candidates.normalized_descriptor,
+                        candidates.cadence, candidates.status, candidates.confidence,
+                        candidates.evidence_json, candidates.expected_next_start,
+                        candidates.expected_next_end
+                    FROM recurring_candidates AS candidates
+                    JOIN recurring_candidate_state AS state
+                        ON state.active_generation_id = candidates.generation_id
+                    ORDER BY candidates.first_transaction_date, candidates.recurring_candidate_id
+                    """
+                ).fetchall()
+                memberships = {
+                    candidate_id: tuple(row[0] for row in connection.execute(
+                        """
+                        SELECT members.raw_transaction_id
+                        FROM recurring_candidate_members AS members
+                        JOIN analytics.mart_transactions AS transactions
+                            USING (raw_transaction_id)
+                        WHERE members.recurring_candidate_id = ?
+                        ORDER BY transactions.transaction_date, members.raw_transaction_id
+                        """,
+                        [candidate_id],
+                    ).fetchall())
+                    for candidate_id, *_ in candidates
+                }
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            RecurringEvidence(
+                candidate_id, label, cadence, status, confidence, json.loads(evidence),
+                memberships[candidate_id], expected_next_start, expected_next_end,
+            )
+            for (
+                candidate_id, label, cadence, status, confidence, evidence,
+                expected_next_start, expected_next_end,
+            ) in candidates
+        ]
+
+    def list_review_evidence(self) -> list[ReviewEvidence]:
+        try:
+            with duckdb.connect(str(self.database_path)) as connection:
+                duplicates = connection.execute(
+                    """
+                    SELECT candidates.duplicate_candidate_id, candidates.confidence,
+                        candidates.evidence_json, candidates.first_raw_transaction_id,
+                        candidates.second_raw_transaction_id
+                    FROM duplicate_review_candidates AS candidates
+                    JOIN analytics.mart_transactions AS first_transaction
+                        ON first_transaction.raw_transaction_id = candidates.first_raw_transaction_id
+                    JOIN analytics.mart_transactions AS second_transaction
+                        ON second_transaction.raw_transaction_id = candidates.second_raw_transaction_id
+                    ORDER BY candidates.duplicate_candidate_id
+                    """
+                ).fetchall()
+                unusual = connection.execute(
+                    """
+                    SELECT candidates.unusual_candidate_id, candidates.confidence,
+                        candidates.evidence_json, candidates.raw_transaction_id
+                    FROM unusual_spend_candidates AS candidates
+                    JOIN analytics.mart_transactions AS transactions
+                        USING (raw_transaction_id)
+                    ORDER BY candidates.unusual_candidate_id
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            ReviewEvidence(candidate_id, "duplicate", "candidate", confidence, json.loads(evidence), (first_id, second_id))
+            for candidate_id, confidence, evidence, first_id, second_id in duplicates
+        ] + [
+            ReviewEvidence(candidate_id, "unusual_spend", "candidate", confidence, json.loads(evidence), (transaction_id,))
+            for candidate_id, confidence, evidence, transaction_id in unusual
+        ]
+
+    def list_period_rows(
+        self, start: date, end: date, account: str, currency: str
+    ) -> list[PeriodRow]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT transactions.raw_transaction_id, transactions.account_identity,
+                        transactions.transaction_date, transactions.description,
+                        transactions.currency, transactions.amount_minor,
+                        transactions.direction, merchants.merchant_name,
+                        categories.category_label, recurring.normalized_descriptor
+                    FROM analytics.mart_transactions AS transactions
+                    LEFT JOIN merchants ON transactions.merchant_id = merchants.merchant_id
+                    LEFT JOIN categories ON transactions.category_id = categories.category_id
+                    LEFT JOIN (
+                        SELECT members.raw_transaction_id,
+                            min(candidates.normalized_descriptor) AS normalized_descriptor
+                        FROM recurring_candidate_members AS members
+                        JOIN recurring_candidates AS candidates
+                            USING (recurring_candidate_id)
+                        JOIN recurring_candidate_state AS state
+                            ON state.active_generation_id = candidates.generation_id
+                        GROUP BY members.raw_transaction_id
+                    ) AS recurring USING (raw_transaction_id)
+                    WHERE transactions.transaction_date > ? AND transactions.transaction_date < ?
+                        AND transactions.account_identity = ? AND transactions.currency = ?
+                    ORDER BY transactions.transaction_date, transactions.raw_transaction_id
+                    """,
+                    [start, end, account, currency],
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return [
+            PeriodRow(
+                TrustedTransaction(
+                    raw_transaction_id, account_identity, transaction_date, description,
+                    normalize_descriptor(description), row_currency, amount_minor, direction,
+                ),
+                merchant_name=merchant_name,
+                category_label=category_label,
+                recurring_group=recurring_group,
+            )
+            for (
+                raw_transaction_id, account_identity, transaction_date, description,
+                row_currency, amount_minor, direction, merchant_name, category_label,
+                recurring_group,
+            ) in rows
+        ]
 
     def _write(self, query: str, parameters: list[object]) -> None:
         with (

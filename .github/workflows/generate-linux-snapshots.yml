@@ -1,0 +1,37 @@
+name: Generate Linux screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/api-interface
+    paths:
+      - .github/workflows/generate-linux-snapshots.yml
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: uv sync --locked
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      - run: pnpm --dir apps/web exec playwright test tests/e2e/demo.spec.ts --grep "readable" --update-snapshots --reporter=list
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-playwright-snapshots
+          path: apps/web/tests/e2e/demo.spec.ts-snapshots/*-linux.png
+          if-no-files-found: error
+          retention-days: 1

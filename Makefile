@@ -1,4 +1,4 @@
-.PHONY: dev test lint clean-demo analytics analytics-test
+.PHONY: dev test e2e lint clean-demo analytics analytics-test
 
 dev:
 	docker compose up --build
@@ -6,6 +6,9 @@ dev:
 test:
 	UV_CACHE_DIR=.uv-cache uv run pytest
 	pnpm --dir apps/web test
+
+e2e:
+	pnpm --dir apps/web exec playwright test --reporter=list
 
 lint:
 	UV_CACHE_DIR=.uv-cache uv run ruff check apps/api sample_data

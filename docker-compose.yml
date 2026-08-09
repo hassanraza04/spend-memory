@@ -5,12 +5,13 @@ services:
       dockerfile: apps/api/Dockerfile
     environment:
       DUCKDB_PATH: /data/spend-memory.duckdb
+      SPEND_MEMORY_DATA_DIRECTORY: /data/documents
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - duckdb_data:/data
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/api/v1/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -22,6 +23,8 @@ services:
       dockerfile: apps/web/Dockerfile
     ports:
       - "127.0.0.1:3000:3000"
+    environment:
+      SPEND_MEMORY_API_URL: http://api:8000
     depends_on:
       api:
         condition: service_healthy
@@ -35,4 +38,3 @@ services:
 volumes:
   duckdb_data:
     driver: local
-

@@ -5,7 +5,7 @@ from datetime import date
 
 import fitz
 
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 from spend_memory.ingestion.registry import ParserErrorCode, StatementParserError
 
 _TITLE = "SYNTHETIC PKR ACTIVITY"
@@ -15,6 +15,7 @@ _AMOUNT = re.compile(r"PKR (-?(?:0|[1-9]\d*))\Z")
 class SyntheticPkrCompactPdfParser:
     parser_id = "synthetic-pkr-compact-pdf"
     version = "1.1"
+    capabilities = ParserCapabilities(True, False, False, True, True)
 
     def can_parse(self, document: bytes, filename: str) -> float:
         if not filename.lower().endswith(".pdf"):

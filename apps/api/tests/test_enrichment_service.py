@@ -46,3 +46,53 @@ def test_refresh_fails_when_the_trusted_mart_is_unavailable(tmp_path: Path) -> N
 
     with pytest.raises(RuntimeError, match="^trusted_mart_unavailable$"):
         EnrichmentService(repository).refresh()
+
+
+def test_refresh_assigns_matching_trusted_rows_to_confirmed_counterparty_aliases(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions")
+    repository = EnrichmentRepository(database_path)
+    counterparty = repository.create_counterparty("Weekend groceries")
+    repository.confirm_counterparty_alias("METRO MART", counterparty.counterparty_id)
+
+    EnrichmentService(repository).refresh()
+
+    descriptions = [
+        row.description
+        for row in repository.list_counterparty_transactions(counterparty.counterparty_id)
+    ]
+    assert descriptions and set(descriptions) == {"METRO MART", "METRO-MART"}
+
+
+def test_refresh_keeps_an_explicit_counterparty_assignment_over_an_alias(
+    tmp_path: Path,
+) -> None:
+    database_path = _build_fixture_database(tmp_path)
+    _dbt_build(database_path, "mart_transactions")
+    repository = EnrichmentRepository(database_path)
+    alias_counterparty = repository.create_counterparty("Weekend groceries")
+    manual_counterparty = repository.create_counterparty("Family transfer")
+    repository.confirm_counterparty_alias("METRO MART", alias_counterparty.counterparty_id)
+    transaction = next(
+        item
+        for item in repository.list_trusted_transactions()
+        if item.normalized_description == "metro mart"
+    )
+    repository.assign_counterparty_transactions(
+        manual_counterparty.counterparty_id, [transaction.raw_transaction_id]
+    )
+
+    EnrichmentService(repository).refresh()
+
+    manual_ids = {
+        item.raw_transaction_id
+        for item in repository.list_counterparty_transactions(manual_counterparty.counterparty_id)
+    }
+    alias_ids = {
+        item.raw_transaction_id
+        for item in repository.list_counterparty_transactions(alias_counterparty.counterparty_id)
+    }
+    assert transaction.raw_transaction_id in manual_ids
+    assert transaction.raw_transaction_id not in alias_ids

@@ -31,6 +31,21 @@ class ImportResult:
     run_id: UUID
     transaction_count: int
     was_already_imported: bool
+    parser_id: str
+    parser_version: str
+
+
+@dataclass(frozen=True)
+class ImportInspection:
+    document_id: UUID
+    run_id: UUID
+    original_filename: str
+    mime_type: str
+    byte_size: int
+    transaction_count: int
+    parser_id: str
+    parser_version: str
+    is_demo: bool
 
 
 @dataclass(frozen=True)
@@ -330,6 +345,8 @@ class ImportRepository:
                 run_id=existing[1],
                 transaction_count=existing[2],
                 was_already_imported=True,
+                parser_id=parser_id,
+                parser_version=parser_version,
             )
 
     def record_isolated_parse_error(
@@ -418,6 +435,59 @@ class ImportRepository:
         if declared_mime_type == "application/pdf":
             self._validate_pdf(document)
 
+    def mark_document_as_demo(self, document_id: UUID) -> None:
+        """Mark a synthetic document after it passes the normal safe ingress."""
+        with (
+            database_write_lock(self.database_path),
+            duckdb.connect(str(self.database_path)) as connection,
+        ):
+            connection.execute(
+                "UPDATE source_documents SET is_demo = true WHERE document_id = ?",
+                [document_id],
+            )
+
+    def inspect_document(self, document_id: UUID) -> ImportInspection | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT documents.document_id, runs.run_id, documents.original_filename,
+                    documents.mime_type, documents.byte_size,
+                    (SELECT count(*) FROM raw_transactions WHERE import_run_id = runs.run_id),
+                    runs.parser_id, runs.parser_version, coalesce(documents.is_demo, false)
+                FROM source_documents AS documents
+                JOIN import_runs AS runs
+                  ON runs.document_id = documents.document_id AND runs.is_active
+                WHERE documents.document_id = ?
+                """,
+                [document_id],
+            ).fetchone()
+        return None if row is None else ImportInspection(*row)
+
+    def read_document_for_reprocess(
+        self, document_id: UUID
+    ) -> tuple[bytes, str, str] | None:
+        with duckdb.connect(str(self.database_path), read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT storage_filename, sha256_hex, original_filename, mime_type
+                FROM source_documents WHERE document_id = ?
+                """,
+                [document_id],
+            ).fetchone()
+        if row is None:
+            return None
+        storage_filename, document_sha256, filename, mime_type = row
+        path = self.data_directory / storage_filename
+        if Path(storage_filename).name != storage_filename:
+            raise ImportRepositoryError("storage_failed")
+        try:
+            document = path.read_bytes()
+        except OSError:
+            raise ImportRepositoryError("storage_failed") from None
+        if sha256(document).hexdigest() != document_sha256:
+            raise ImportRepositoryError("storage_failed")
+        return document, filename, mime_type
+
     def _import_validated_document(
         self,
         *,
@@ -471,6 +541,8 @@ class ImportRepository:
                 run_id=existing[1],
                 transaction_count=existing[2],
                 was_already_imported=True,
+                parser_id=parser_id,
+                parser_version=parser_version,
             )
 
         document_id = uuid4()
@@ -629,6 +701,8 @@ class ImportRepository:
             run_id=run_id,
             transaction_count=len(transactions),
             was_already_imported=False,
+            parser_id=parser_id,
+            parser_version=parser_version,
         )
 
     def _stage_document(self, document: bytes, document_sha256: str) -> Path:

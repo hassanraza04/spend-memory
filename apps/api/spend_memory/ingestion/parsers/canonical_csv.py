@@ -4,7 +4,7 @@ import csv
 import re
 from datetime import date
 
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 from spend_memory.ingestion.registry import ParserErrorCode, StatementParserError
 
 _COLUMNS = (
@@ -23,6 +23,7 @@ _AMOUNT = re.compile(r"-?(?:0|[1-9]\d*)\Z")
 class CanonicalCsvParser:
     parser_id = "canonical-csv"
     version = "1.1"
+    capabilities = ParserCapabilities(True, False, False, True, True)
 
     def can_parse(self, document: bytes, filename: str) -> float:
         return 0.9 if filename.lower().endswith(".csv") else 0.0

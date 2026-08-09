@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir uv==0.11.27
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+COPY analytics ./analytics
 COPY apps/api ./apps/api
 
 ENV PATH="/app/.venv/bin:${PATH}"

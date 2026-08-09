@@ -12,7 +12,10 @@ from spend_memory.enrichment.models import (
 )
 from spend_memory.enrichment.normalization import normalize_descriptor
 
-_FILTERS = {"after", "before", "currency", "direction", "merchant", "category", "amount", "state"}
+_FILTERS = {
+    "after", "before", "account", "currency", "direction", "merchant", "category",
+    "counterparty", "amount", "state",
+}
 
 
 class SearchQueryError(ValueError):
@@ -25,6 +28,13 @@ class SearchRow:
     category: CategoryDecision
     merchant_name: str | None
     state: str
+    source_document: str = ""
+    source_ordinal: int = 0
+    source_page: int | None = None
+    source_row: int | None = None
+    source_text: str = ""
+    extraction_confidence: float = 0.0
+    counterparty_label: str | None = None
 
 
 def parse_search_query(query: str) -> SearchQuery:
@@ -48,10 +58,12 @@ def parse_search_query(query: str) -> SearchQuery:
     return SearchQuery(
         after=after,
         before=before,
+        account=values.get("account"),
         currency=values.get("currency"),
         direction=values.get("direction"),
         merchant=values.get("merchant"),
         category=values.get("category"),
+        counterparty=values.get("counterparty"),
         amount_min_minor=amount_min,
         amount_max_minor=amount_max,
         state=values.get("state"),
@@ -60,9 +72,9 @@ def parse_search_query(query: str) -> SearchQuery:
 
 
 def search_transactions(
-    rows: Iterable[SearchRow], query: SearchQuery
+    rows: Iterable[SearchRow], query: SearchQuery, *, include_all: bool = False
 ) -> list[SearchResult]:
-    if not query.text and not _has_filter(query):
+    if not query.text and not _has_filter(query) and not include_all:
         return []
     query_normalized = normalize_descriptor(query.text)
     query_tokens = set(query_normalized.split())
@@ -114,10 +126,12 @@ def _matches(row: SearchRow, query: SearchQuery) -> bool:
     return (
         (query.after is None or transaction.transaction_date > query.after)
         and (query.before is None or transaction.transaction_date < query.before)
+        and (query.account is None or _same_text(transaction.account_identity, query.account))
         and (query.currency is None or transaction.currency == query.currency)
         and (query.direction is None or transaction.direction == query.direction)
         and (query.merchant is None or _same_text(row.merchant_name, query.merchant))
         and (query.category is None or _same_text(row.category.category_label, query.category))
+        and (query.counterparty is None or _same_text(row.counterparty_label, query.counterparty))
         and (query.amount_min_minor is None or transaction.amount_minor >= query.amount_min_minor)
         and (query.amount_max_minor is None or transaction.amount_minor <= query.amount_max_minor)
         and (query.state is None or row.state == query.state)

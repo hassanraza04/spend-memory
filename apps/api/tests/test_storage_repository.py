@@ -15,7 +15,7 @@ from threading import Event, Lock
 import duckdb
 import fitz
 import pytest
-from spend_memory.ingestion.base import ParsedRawTransaction
+from spend_memory.ingestion.base import ParsedRawTransaction, ParserCapabilities
 
 CSV_DOCUMENT = (
     b"posted_date,description,amount\n"
@@ -25,6 +25,7 @@ CSV_DOCUMENT = (
 
 class StubParser:
     parser_id = "stub-parser"
+    capabilities = ParserCapabilities(True, False, False, True, True)
 
     def __init__(
         self,
@@ -357,6 +358,31 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ORDER BY table_name
             """
         ).fetchall()
+        counterparty_constraints = connection.execute(
+            """
+            SELECT table_name, constraint_type, constraint_column_names, constraint_text
+            FROM duckdb_constraints()
+            WHERE table_name IN (
+                'counterparties',
+                'counterparty_aliases',
+                'transaction_counterparty_assignments'
+            )
+              AND constraint_type IN ('PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY')
+            """
+        ).fetchall()
+        counterparty_columns = connection.execute(
+            """
+            SELECT table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = 'main'
+              AND table_name IN (
+                'counterparties',
+                'counterparty_aliases',
+                'transaction_counterparty_assignments'
+            )
+              AND (column_name LIKE '%\\_id' ESCAPE '\\' OR column_name LIKE '%\\_at' ESCAPE '\\')
+            """
+        ).fetchall()
         tables = {
             row[0]
             for row in connection.execute(
@@ -374,6 +400,8 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         ("0003_enrichment",),
         ("0004_recurring_candidate_members",),
         ("0005_recurring_candidate_generations",),
+        ("0006_counterparties",),
+        ("0007_demo_imports",),
     ]
     assert {
         "source_documents",
@@ -383,6 +411,9 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
         "recurring_candidate_members",
         "recurring_candidate_generations",
         "recurring_candidate_state",
+        "counterparties",
+        "counterparty_aliases",
+        "transaction_counterparty_assignments",
     } <= tables
     assert member_constraints == [
         ("FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",),
@@ -409,6 +440,72 @@ def test_initial_migration_is_transactional_and_idempotent(tmp_path: Path) -> No
             ),
         ),
     ]
+    primary_key_columns = {
+        (table_name, column_name)
+        for table_name, constraint_type, columns, _ in counterparty_constraints
+        if constraint_type == "PRIMARY KEY"
+        for column_name in columns
+    }
+    assert {
+        table_name: tuple(columns)
+        for table_name, constraint_type, columns, _ in counterparty_constraints
+        if constraint_type == "PRIMARY KEY"
+    } == {
+        "counterparties": ("counterparty_id",),
+        "counterparty_aliases": ("counterparty_alias_id",),
+        "transaction_counterparty_assignments": (
+            "transaction_counterparty_assignment_id",
+        ),
+    }
+    assert {
+        (table_name, column_name): data_type
+        for table_name, column_name, data_type in counterparty_columns
+        if (table_name, column_name) in primary_key_columns
+    } == {
+        ("counterparties", "counterparty_id"): "UUID",
+        ("counterparty_aliases", "counterparty_alias_id"): "UUID",
+        (
+            "transaction_counterparty_assignments",
+            "transaction_counterparty_assignment_id",
+        ): "UUID",
+    }
+    assert {
+        (table_name, column_name): data_type
+        for table_name, column_name, data_type in counterparty_columns
+        if column_name.endswith("_at")
+    } == {
+        ("counterparties", "created_at"): "TIMESTAMP WITH TIME ZONE",
+        ("counterparty_aliases", "confirmed_at"): "TIMESTAMP WITH TIME ZONE",
+        (
+            "transaction_counterparty_assignments",
+            "confirmed_at",
+        ): "TIMESTAMP WITH TIME ZONE",
+    }
+    assert {
+        (table_name, tuple(columns))
+        for table_name, constraint_type, columns, _ in counterparty_constraints
+        if constraint_type == "UNIQUE"
+    } == {
+        ("counterparty_aliases", ("normalized_descriptor",)),
+        ("transaction_counterparty_assignments", ("raw_transaction_id",)),
+    }
+    assert {
+        constraint_text
+        for table_name, constraint_type, _, constraint_text in counterparty_constraints
+        if table_name == "counterparty_aliases"
+        and constraint_type == "FOREIGN KEY"
+    } == {
+        "FOREIGN KEY (counterparty_id) REFERENCES counterparties(counterparty_id)",
+    }
+    assert {
+        constraint_text
+        for table_name, constraint_type, _, constraint_text in counterparty_constraints
+        if table_name == "transaction_counterparty_assignments"
+        and constraint_type == "FOREIGN KEY"
+    } == {
+        "FOREIGN KEY (counterparty_id) REFERENCES counterparties(counterparty_id)",
+        "FOREIGN KEY (raw_transaction_id) REFERENCES raw_transactions(raw_transaction_id)",
+    }
 
 
 def test_failed_migration_rolls_back_schema_and_migration_ledger(
@@ -597,6 +694,8 @@ def test_same_document_and_parser_version_is_idempotent(tmp_path: Path) -> None:
         run_id=first.run_id,
         transaction_count=1,
         was_already_imported=True,
+        parser_id="stub-parser",
+        parser_version="1.0",
     )
     assert parser.parse_calls == 1
     assert counts == (1, 1, 1)
