@@ -68,7 +68,8 @@ export async function importStatement(page: Page, path: string, search = new URL
   ));
   await page.getByLabel("Choose a CSV or PDF").setInputFiles(path);
   await page.getByRole("button", { name: "Import selected statement" }).click();
-  expect((await imported).ok()).toBe(true);
+  const response = await imported;
+  expect(response.ok(), await response.text()).toBe(true);
   await waitForTrustedActivity(page);
 }
 
@@ -80,6 +81,7 @@ export async function resetDemo(page: Page, search = "?after=2026-01-01&before=2
     && new URL(response.url()).pathname === "/api/v1/demo/reset"
   ));
   await page.getByRole("button", { name: "Explore the synthetic demo" }).click();
-  expect((await reset).ok()).toBe(true);
+  const response = await reset;
+  expect(response.ok(), await response.text()).toBe(true);
   await waitForTrustedActivity(page);
 }
