@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: uv sync --locked
+      - run: pnpm install --frozen-lockfile
+      - run: make lint
+      - run: make test
+      - run: pnpm --dir apps/web build
+      - name: Run local browser workflows
+        run: |
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+          make e2e
+      - name: Start Compose services
+        run: docker compose up --build -d
+      - name: Verify HTTP endpoints
+        run: |
+          for url in http://127.0.0.1:8000/health http://127.0.0.1:3000/; do
+            for attempt in {1..30}; do
+              if curl --fail --silent --show-error "$url"; then
+                break
+              fi
+
+              if [ "$attempt" -eq 30 ]; then
+                echo "Timed out waiting for $url"
+                exit 1
+              fi
+
+              sleep 2
+            done
+          done
+      - name: Print Compose logs
+        if: always()
+        run: docker compose logs --no-color
+      - name: Shut down Compose services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  images:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+          - name: web
+            dockerfile: apps/web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Sign in to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and publish ${{ matrix.name }} image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/spend-memory-${{ matrix.name }}:${{ github.ref_name }}
+          sbom: true
+          provenance: true
+
+  publish:
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$VERSION" = "$(awk -F '\"' '/^version = / { print $2; exit }' pyproject.toml)"
+      - name: Create checksummed source assets
+        run: |
+          mkdir release
+          git archive --format=tar.gz --output "release/spend-memory-${GITHUB_REF_NAME}.tar.gz" "$GITHUB_SHA"
+          cp uv.lock pnpm-lock.yaml release/
+          (
+            cd release
+            sha256sum "spend-memory-${GITHUB_REF_NAME}.tar.gz" uv.lock pnpm-lock.yaml > SHA256SUMS
+          )
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "release/spend-memory-${GITHUB_REF_NAME}.tar.gz" \
+            release/uv.lock \
+            release/pnpm-lock.yaml \
+            release/SHA256SUMS \
+            --title "Spend Memory $GITHUB_REF_NAME" \
+            --generate-notes
