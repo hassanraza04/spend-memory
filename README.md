@@ -1,75 +1,118 @@
 # Spend Memory
 
-Spend Memory is a small monorepo with a Next.js web app and a FastAPI service.
+Spend Memory turns local financial statements into a private, searchable transaction history with traceable spending explanations.
 
-## Requirements
+![Spend Memory synthetic demo](apps/web/tests/e2e/demo.spec.ts-snapshots/wide-desktop-darwin.png)
 
-- Python 3.12 and [uv](https://docs.astral.sh/uv/)
-- Node.js 24 and pnpm 11.9.0
-- Tesseract OCR 5 with English language data for local OCR tests
-- Docker Compose for the full local stack
+This is a portfolio and learning project, not a production financial service. It has no accounts, cloud storage, bank connections, payments, analytics trackers, or remote model calls.
 
-Install Tesseract on macOS with `brew install tesseract`. On Ubuntu or Debian,
-use `sudo apt-get update && sudo apt-get install --yes tesseract-ocr`. Confirm
-the executable is available with `tesseract --version`. The API container
-already installs the same package during its image build.
+## Try the synthetic demo
 
-## Development
-
-Install the exact locked dependencies, then run checks:
+The checked-in demo is invented. It includes CSV and PDF statements, a scanned PDF for the local OCR path, known recurring payments, a duplicate candidate, and reconciliation controls.
 
 ```sh
 uv sync --locked
 pnpm install --frozen-lockfile
-make test
+make dev
+```
+
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then choose **Explore the synthetic demo**. Docker Compose binds both services to loopback only. Use `make clean-demo` to remove its local Docker volume.
+
+## What it does
+
+- Imports supported local CSV and PDF statements through isolated parser workers.
+- Preserves raw source rows, then exposes only reconciled transactions for totals and analysis.
+- Resolves merchant aliases, finds recurring payments, and surfaces possible duplicates or unusual spend for review.
+- Searches descriptions and structured fields, including accounts, categories, counterparties, date ranges, amounts, currencies, and review state.
+- Lets a person group trusted transactions under a private local counterparty label and see sent, received, and net flow by currency.
+- Explains a spending change with the exact transactions that contributed to it.
+
+## Supported inputs and limits
+
+The repository includes one canonical CSV layout and two synthetic PDF layouts. The PDF parsers demonstrate the extension boundary, not universal bank support. Receipt images and transaction screenshots are experimental and disabled by default.
+
+All real statement data stays on the device. This project does not support Windows, multi-user access, remote access, currency conversion, or cross-currency totals. See [adding a parser](docs/adding-a-parser.md) for the safe extension path.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  statement["Local CSV or PDF"] --> ingress["Safe import ingress"]
+  ingress --> worker["Isolated parser or OCR worker"]
+  worker --> raw["Raw rows and source files\nlocal DuckDB"]
+  raw --> dbt["dbt reconciliation models"]
+  dbt --> trusted["Trusted transaction mart"]
+  trusted --> enrich["Local enrichment and deterministic analysis"]
+  enrich --> api["FastAPI on 127.0.0.1"]
+  api --> web["Next.js personal record"]
+```
+
+The [architecture guide](docs/architecture.md) explains these boundaries and the local refresh flow. The [data model](docs/data-model.md) explains what is immutable, what is an annotation, and why source lineage is retained.
+
+## Data pipeline and reasoning rules
+
+1. Validate an untrusted file, select a parser in a spawned worker, and store source-faithful rows.
+2. Use dbt to normalize amounts and directions, reconcile the import, and build trusted analytics marts.
+3. Run local enrichment only after reconciliation. Merchant, category, counterparty, recurring, and review information remains separate from financial facts.
+4. Query the trusted mart through the local API and show every aggregate with transaction and source evidence.
+
+Money is always deterministic. Amounts are signed integer minor units in storage and are never calculated by ML or floating point. Heuristics handle ambiguity such as merchant aliases and recurring patterns, but they only make suggestions or annotations that a person can review.
+
+## Methods and baselines
+
+Merchant matching uses normalized aliases, text similarity, and local confirmed corrections. Its held-out evaluation compares that approach with exact alias matching. Search uses a local lexical baseline with structured filters. There is no hosted inference, downloaded model, semantic index, or external merchant lookup.
+
+Recurring and duplicate detection use transparent date, amount, account, currency, and direction rules. They produce candidates, not changed transactions or altered totals.
+
+## Evaluation
+
+The reproducible [evaluation report](evaluations/artifacts/REPORT.md) uses only the immutable 864-row synthetic ledger.
+
+| Measure | Result |
+| --- | ---: |
+| Extraction field precision and recall | 100% / 100% |
+| Exact amount accuracy and reconciliation rate | 100% / 100% |
+| Held-out merchant precision, recall, coverage | 100% / 100% / 100% |
+| Recurring precision and recall | 100% / 100% |
+| Duplicate precision at review threshold | 100% |
+| Search Recall@5, MRR, filter correctness | 100% / 100% / 100% |
+
+The recorded local benchmark ran on an Apple M2 MacBook Air with 16 GB RAM and macOS 15.6. It imported the 864 synthetic transactions in 2063.13 ms and ran the fixed 50-query search suite in 0.59 ms. These are local measurements, not production performance claims. Regenerate the report with:
+
+```sh
+PYTHONPATH=apps/api:. uv run python -m evaluations.generate --output evaluations/artifacts
+```
+
+## Privacy model
+
+Original files, raw rows, trusted data, and corrections remain in the configured local data directory and DuckDB file. The browser keeps only small interface preferences. Parser and OCR workers have input checks and resource limits. State-changing browser requests must originate from the local web app.
+
+Read [privacy.md](docs/privacy.md) and the [threat model](docs/threat-model.md) for the protections and their limits. Do not commit real statements, exports, screenshots, or logs.
+
+## Repository structure
+
+```text
+apps/api/        FastAPI routes, local services, parser workers, and tests
+apps/web/        Next.js interface, component tests, and Playwright workflows
+analytics/       dbt reconciliation and trusted analytics models
+evaluations/     reproducible synthetic quality and runtime reports
+sample_data/     deterministic synthetic statements and expected ledger
+docs/            architecture, privacy, threat model, and extension guides
+```
+
+## Development checks
+
+```sh
 make lint
+make test
+pnpm --dir apps/web build
+make e2e
 ```
 
-Use `make dev` to build and start the stack. The web app is bound to `127.0.0.1:3000` and the API health endpoint is at `http://127.0.0.1:8000/health`. DuckDB data is retained in the local `duckdb_data` Docker volume. Use `make clean-demo` to stop the stack and remove that demo volume.
+`make e2e` uses synthetic fixtures only. The GitHub workflow also builds the Docker Compose stack and checks its loopback endpoints.
 
-Build local analytics models against a local DuckDB file:
+## Add a parser
 
-```sh
-SPEND_MEMORY_DUCKDB_PATH=/absolute/path/to/local.duckdb make analytics
-```
+New statement formats must be local, picklable parser implementations with a stable ID and version, source-faithful output, synthetic conformance data, and registry registration. They must not calculate money, write to storage directly, or silently correct a source row.
 
-The checked-in analytics profile disables anonymous dbt usage telemetry. This is a local-only privacy choice.
-
-Import storage uses `fcntl` advisory file locks. A database-level lock beside
-the DuckDB file coordinates every local writer, including imports of different
-statement documents. Per-document locks in the configured data directory also
-make exact retries idempotent and protect original-file replacement. This is
-supported on macOS, Linux, and the Linux Docker runtime used by this project.
-Windows is not a supported local runtime.
-
-PDF structural inspection, statement parser detection, and extraction run in
-local spawned processes. Each worker has a 25 CPU-second limit and can hold at
-most 64 file descriptors. Linux workers also have a 1.5 GiB address-space
-limit. macOS does not apply
-`RLIMIT_AS`: its Python runtime maps system shared memory before the worker
-starts, so the kernel rejects a lower address-space limit. Parser extraction
-results are capped at 10,000 transactions before the API reads them. Limit
-breaches return safe import errors and never expose parser details.
-
-`IngestionService.import_document` is the only supported production entry point
-for statement bytes. It validates each document before using the registry's
-isolated parser worker. Direct parser calls are limited to trusted parser unit
-tests outside that worker; the registry does not expose public direct selection
-or parsing methods. `ImportRepository.store_preparsed_document` is a lower-level
-persistence boundary for already isolated `ParsedRawTransaction` output. It
-never selects or runs a parser. Native PDF text extraction and Tesseract OCR
-helpers are private parser-worker helpers, not production entry points.
-
-When a caller retries a known parser result, it passes that parser's stable ID
-and version to `import_document`. Spend Memory then checks the document SHA-256
-and parser identity before starting a worker. An exact stored run is returned
-without parser detection or extraction. A new parser version proceeds through
-the normal isolated parsing path.
-
-## Branch convention
-
-`main` remains stable. Normal work uses `feature/<short-name>`. Use isolated Git worktrees for parallel or high-risk changes. The tracked `.githooks/pre-push` hook rejects non-fast-forward pushes to `main`; enable it locally with:
-
-```sh
-git config core.hooksPath .githooks
-```
+Follow the complete [parser guide](docs/adding-a-parser.md).
