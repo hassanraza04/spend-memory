@@ -150,3 +150,25 @@ def test_unexpected_errors_do_not_expose_exception_details(tmp_path: Path) -> No
             "details": [],
         }
     }
+
+
+def test_local_api_rejects_cross_origin_mutations(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+
+    @app.post("/api/v1/mutation-probe")
+    def mutation_probe() -> dict[str, str]:
+        return {"status": "changed"}
+
+    response = TestClient(app).post(
+        "/api/v1/mutation-probe",
+        headers={"Origin": "https://untrusted.example"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": {
+            "code": "cross_origin_request",
+            "message": "This local request is not allowed.",
+            "details": [],
+        }
+    }
