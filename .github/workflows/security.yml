@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+    tags: ["v*"]
   schedule:
     - cron: "30 12 * * 1"
   workflow_dispatch:
