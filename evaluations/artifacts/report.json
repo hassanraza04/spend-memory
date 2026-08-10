@@ -1,0 +1,55 @@
+{
+  "dataset": {
+    "seed": 20260727,
+    "transaction_count": 864
+  },
+  "deferred_metrics": {
+    "category_learning": "not implemented",
+    "ocr": "excluded from the canonical ledger",
+    "semantic_index": "not implemented"
+  },
+  "duplicate_detection": {
+    "precision_at_review_threshold": 1.0
+  },
+  "extraction": {
+    "exact_amount_accuracy": 1.0,
+    "field_precision": 1.0,
+    "field_recall": 1.0,
+    "reconciliation_rate": 1.0,
+    "transaction_count": 864
+  },
+  "known_limitations": [
+    "The image-only OCR fixture is exploratory and has no immutable ledger label.",
+    "Category learning and semantic indexing are deliberately not product features yet.",
+    "Runtime numbers are local-machine measurements, not performance guarantees."
+  ],
+  "merchant_resolution": {
+    "baseline_precision": 0.0,
+    "coverage": 1.0,
+    "expected_calibration_error": 0.15729902839961563,
+    "precision": 1.0,
+    "recall": 1.0,
+    "top_k": 1,
+    "top_k_accuracy": 1.0
+  },
+  "recurring_detection": {
+    "f1_by_frequency": {
+      "monthly": 1.0
+    },
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "runtime": {
+    "import_time_ms": 2063.13,
+    "index_time_ms": null,
+    "ocr_time_ms": null,
+    "peak_rss_kib": 140384,
+    "query_latency_ms": 0.59
+  },
+  "search": {
+    "mrr": 1.0,
+    "query_count": 50,
+    "recall_at_5": 1.0,
+    "structured_filter_correctness": 1.0
+  }
+}
