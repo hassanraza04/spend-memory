@@ -2,7 +2,9 @@ import { expect, resetDemo, test } from "./fixtures";
 
 test("explores the synthetic demo with source evidence and a grouped AED flow", async ({ page, freshRecord }) => {
   await freshRecord();
-  await resetDemo(page);
+  await resetDemo(page, "");
+  await expect(page).toHaveURL(/after=2026-01-01&before=2026-02-01/);
+  await expect(page.getByRole("row").nth(1)).toBeVisible();
 
   await page.getByLabel("Search activity").fill("MetroMart");
   await page.getByRole("button", { name: "Apply filters" }).click();

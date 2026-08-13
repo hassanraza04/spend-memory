@@ -18,7 +18,7 @@ describe("home page", () => {
       },
     });
   });
-  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it("opens with the monthly question and the first-run choices", () => {
     render(<Page />);
@@ -28,26 +28,130 @@ describe("home page", () => {
     expect(screen.getByRole("button", { name: "Explore the synthetic demo" })).toBeTruthy();
   });
 
-  it("persists the default current-month range in the URL", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 3));
+  it("loads the latest available month and replaces the URL once", async () => {
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000001", transaction_date: "2026-04-10", account: "Daily", description: "April activity", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "April activity", extraction_confidence: 0.98 },
+    };
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      requests.push(String(url));
+      return Promise.resolve(new Response(JSON.stringify(
+        String(url).includes("/workspace-context")
+          ? { firstTransactionDate: "2026-01-01", lastTransactionDate: "2026-04-10", latestMonthStart: "2026-04-01", latestMonthEnd: "2026-05-01", accounts: [{ account: "Daily", currencies: ["AED"] }] }
+          : String(url).includes("/lens")
+            ? { lens: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 1 }], trend: [] }
+            : { items: [transaction], total: 1, limit: 50, offset: 0 },
+      ), { status: 200 }));
+    }));
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
     render(<Page />);
 
-    expect(window.location.search).toContain("after=2026-08-01");
-    expect(window.location.search).toContain("before=2026-09-01");
+    expect(await screen.findByText("April activity")).toBeTruthy();
+    expect(requests[0]).toBe("/api/v1/workspace-context");
+    expect(requests).toContain("/api/v1/transactions?after=2026-04-01&before=2026-05-01");
+    expect(window.location.search).toContain("after=2026-04-01");
+    expect(window.location.search).toContain("before=2026-05-01");
+    expect(replaceState).toHaveBeenCalledOnce();
   });
 
-  it("switches to the synthetic demo period after resetting the demo", async () => {
-    vi.stubGlobal("fetch", vi.fn((url: string | URL, init?: { method?: string }) => Promise.resolve(new Response(JSON.stringify(
-      init?.method === "POST" && String(url).includes("/demo/reset") ? { status: "reset" } : String(url).includes("/lens") ? { lens: [], trend: [] } : { items: [], total: 0, limit: 50, offset: 0 },
-    ), { status: 200 }))));
+  it("loads a partial URL range without waiting for workspace context", async () => {
+    window.history.replaceState({}, "", "/?after=2026-04-01");
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000002", transaction_date: "2026-04-10", account: "Daily", description: "Partial range activity", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "Partial range activity", extraction_confidence: 0.98 },
+    };
+    const fetchMock = vi.fn((url: string | URL) => {
+      if (String(url).includes("/workspace-context")) return new Promise<Response>(() => {});
+      return Promise.resolve(new Response(JSON.stringify(
+        String(url).includes("/lens")
+          ? { lens: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 1 }], trend: [] }
+          : { items: [transaction], total: 1, limit: 50, offset: 0 },
+      ), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Page />);
+
+    expect(await screen.findByText("Partial range activity")).toBeTruthy();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain("/api/v1/workspace-context");
+  });
+
+  it("refreshes activity after grouping without refreshing workspace context", async () => {
+    window.history.replaceState({}, "", "/?after=2026-04-01&before=2026-05-01");
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000003", transaction_date: "2026-04-10", account: "Daily", description: "Group me", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "Group me", extraction_confidence: 0.98 },
+    };
+    const activityRequests: string[] = [];
+    const fetchMock = vi.fn((url: string | URL, init?: { method?: string }) => {
+      const path = String(url);
+      if (path.includes("/workspace-context")) return Promise.resolve(new Response(JSON.stringify({ firstTransactionDate: "2026-04-01", lastTransactionDate: "2026-04-10", latestMonthStart: "2026-04-01", latestMonthEnd: "2026-05-01", accounts: [{ account: "Daily", currencies: ["AED"] }] }), { status: 200 }));
+      if (init?.method === "POST" && path.endsWith("/counterparties")) return Promise.resolve(new Response(JSON.stringify({ counterparty_id: "00000000-0000-0000-0000-000000000010", label: "Rina" }), { status: 201 }));
+      if (init?.method === "POST" && path.includes("/counterparties/")) return Promise.resolve(new Response(JSON.stringify({ lens: [] }), { status: 200 }));
+      if (path.includes("/transactions")) activityRequests.push(path);
+      return Promise.resolve(new Response(JSON.stringify(
+        path.includes("/lens") ? { lens: [], trend: [] } : { items: [transaction], total: 1, limit: 50, offset: 0 },
+      ), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Page />);
+
+    await screen.findByText("Group me");
+    fireEvent.click(screen.getByLabelText("Group Group me"));
+    fireEvent.change(screen.getByLabelText("Counterparty name"), { target: { value: "Rina" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and group" }));
+
+    await waitFor(() => expect(activityRequests).toHaveLength(4));
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/workspace-context"))).toHaveLength(0);
+  });
+
+  it("reloads an explicit scope after demo reset without workspace context", async () => {
+    window.history.replaceState({}, "", "/?after=2026-04-01&before=2026-05-01");
+    let demoReady = false;
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000004", transaction_date: "2026-04-10", account: "Daily", description: "Reset demo activity", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "Reset demo activity", extraction_confidence: 0.98 },
+    };
+    const fetchMock = vi.fn((url: string | URL, init?: { method?: string }) => {
+      const path = String(url);
+      if (path.includes("/workspace-context")) return new Promise<Response>(() => {});
+      if (init?.method === "POST" && path.includes("/demo/reset")) { demoReady = true; return Promise.resolve(new Response(JSON.stringify({ status: "reset" }), { status: 200 })); }
+      return Promise.resolve(new Response(JSON.stringify(
+        path.includes("/lens") ? { lens: [], trend: [] } : path.includes("limit=1") ? { items: demoReady ? [transaction] : [], total: demoReady ? 1 : 0, limit: 1, offset: 0 } : { items: demoReady ? [transaction] : [], total: demoReady ? 1 : 0, limit: 50, offset: 0 },
+      ), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Page />);
+
+    const demo = await screen.findByRole("button", { name: "Explore the synthetic demo" });
+    fireEvent.click(demo);
+
+    expect(await screen.findByText("Reset demo activity")).toBeTruthy();
+    expect(window.location.search).toBe("?after=2026-04-01&before=2026-05-01");
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain("/api/v1/workspace-context");
+  });
+
+  it("switches to the available demo period after resetting the demo", async () => {
+    let demoReady = false;
+    vi.stubGlobal("fetch", vi.fn((url: string | URL, init?: { method?: string }) => {
+      if (init?.method === "POST" && String(url).includes("/demo/reset")) demoReady = true;
+      return Promise.resolve(new Response(JSON.stringify(
+        init?.method === "POST" && String(url).includes("/demo/reset")
+          ? { status: "reset" }
+          : String(url).includes("/workspace-context")
+            ? { firstTransactionDate: demoReady ? "2026-01-01" : null, lastTransactionDate: demoReady ? "2026-01-31" : null, latestMonthStart: demoReady ? "2026-01-01" : null, latestMonthEnd: demoReady ? "2026-02-01" : null, accounts: demoReady ? [{ account: "Daily", currencies: ["AED"] }] : [] }
+            : String(url).includes("/lens")
+              ? { lens: [], trend: [] }
+              : { items: [], total: demoReady ? 1 : 0, limit: 50, offset: 0 },
+      ), { status: 200 }));
+    }));
 
     render(<Page />);
     const demo = screen.getByRole("button", { name: "Explore the synthetic demo" });
     await waitFor(() => expect(demo).toHaveProperty("disabled", false));
     fireEvent.click(demo);
 
-    await screen.findByText("Synthetic demo data is ready. Clear it before importing personal data.");
+    await screen.findByText("Here is the exact trusted activity in your current scope.");
     expect(window.location.search).toContain("after=2026-01-01");
     expect(window.location.search).toContain("before=2026-02-01");
   });
@@ -55,7 +159,7 @@ describe("home page", () => {
   it("restores the synthetic demo period when a marked demo workspace reloads", async () => {
     window.localStorage.setItem("spend-memory-demo-workspace", "true");
     vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
-      String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("limit=1") ? { items: [{}], total: 1, limit: 1, offset: 0 } : { items: [], total: 0, limit: 50, offset: 0 },
+      String(url).includes("/workspace-context") ? { firstTransactionDate: "2026-01-01", lastTransactionDate: "2026-01-31", latestMonthStart: "2026-01-01", latestMonthEnd: "2026-02-01", accounts: [{ account: "Daily", currencies: ["AED"] }] } : String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("limit=1") ? { items: [{}], total: 1, limit: 1, offset: 0 } : { items: [], total: 0, limit: 50, offset: 0 },
     ), { status: 200 }))));
 
     render(<Page />);
