@@ -124,7 +124,7 @@ def _has_filter(query: SearchQuery) -> bool:
 def _matches(row: SearchRow, query: SearchQuery) -> bool:
     transaction = row.transaction
     return (
-        (query.after is None or transaction.transaction_date > query.after)
+        (query.after is None or transaction.transaction_date >= query.after)
         and (query.before is None or transaction.transaction_date < query.before)
         and (query.account is None or _same_text(transaction.account_identity, query.account))
         and (query.currency is None or transaction.currency == query.currency)

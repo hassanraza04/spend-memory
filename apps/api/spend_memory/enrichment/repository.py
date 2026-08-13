@@ -944,7 +944,7 @@ class EnrichmentRepository:
                             ON state.active_generation_id = candidates.generation_id
                         GROUP BY members.raw_transaction_id
                     ) AS recurring USING (raw_transaction_id)
-                    WHERE transactions.transaction_date > ? AND transactions.transaction_date < ?
+                    WHERE transactions.transaction_date >= ? AND transactions.transaction_date < ?
                         AND transactions.account_identity = ? AND transactions.currency = ?
                     ORDER BY transactions.transaction_date, transactions.raw_transaction_id
                     """,

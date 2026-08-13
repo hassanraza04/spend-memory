@@ -14,9 +14,14 @@ from spend_memory.enrichment.service import EnrichmentService
 from apps.api.tests.test_analytics_models import _build_fixture_database, _dbt_build
 
 
-def _row(identifier: int, amount_minor: int = 1200, direction: str = "debit") -> SearchRow:
+def _row(
+    identifier: int,
+    transaction_date: date,
+    amount_minor: int = 1200,
+    direction: str = "debit",
+) -> SearchRow:
     return SearchRow(
-        TrustedTransaction(UUID(int=identifier), "AED-001", date(2026, 1, identifier), "Rina lunch", "rina lunch", "AED", amount_minor, direction),
+        TrustedTransaction(UUID(int=identifier), "AED-001", transaction_date, "Rina lunch", "rina lunch", "AED", amount_minor, direction),
         CategoryDecision(None, "uncategorized", "unavailable"),
         None,
         "unresolved",
@@ -31,7 +36,10 @@ def _row(identifier: int, amount_minor: int = 1200, direction: str = "debit") ->
 
 class _Rows:
     def list_search_rows(self) -> list[SearchRow]:
-        return [_row(1), _row(2, 300, "credit")]
+        return [
+            _row(1, date(2026, 1, 1)),
+            _row(2, date(2026, 2, 1), 300, "credit"),
+        ]
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -79,6 +87,30 @@ def test_transactions_reject_invalid_direction(tmp_path: Path) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_transactions_and_lens_use_an_inclusive_start_and_exclusive_end_date(
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path)
+
+    transactions = client.get("/api/v1/transactions?after=2026-01-01&before=2026-02-01")
+    lens = client.get("/api/v1/lens?after=2026-01-01&before=2026-02-01")
+
+    assert transactions.status_code == lens.status_code == 200
+    assert [item["transaction_id"] for item in transactions.json()["items"]] == [
+        "00000000-0000-0000-0000-000000000001"
+    ]
+    assert transactions.json()["total"] == 1
+    assert lens.json()["lens"] == [
+        {
+            "currency": "AED",
+            "sent_minor": 1200,
+            "received_minor": 0,
+            "net_minor": -1200,
+            "transaction_count": 1,
+        }
+    ]
 
 
 def test_transactions_read_trusted_mart_rows_only(tmp_path: Path) -> None:

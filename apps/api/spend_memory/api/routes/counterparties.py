@@ -33,7 +33,7 @@ def _scoped_transactions(
 ) -> list[TrustedTransaction]:
     return [
         transaction for transaction in transactions
-        if (scope.after is None or transaction.transaction_date > scope.after)
+        if (scope.after is None or transaction.transaction_date >= scope.after)
         and (scope.before is None or transaction.transaction_date < scope.before)
         and (scope.account is None or transaction.account_identity == scope.account)
         and (scope.currency is None or transaction.currency == scope.currency)
