@@ -38,4 +38,25 @@ describe("ApiClient", () => {
       expect.objectContaining({ method: "DELETE", body: JSON.stringify({ confirmation: "DELETE LOCAL DATA" }) }),
     );
   });
+
+  it("gets workspace context from the local versioned route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      firstTransactionDate: "2026-01-01",
+      lastTransactionDate: "2026-04-30",
+      latestMonthStart: "2026-04-01",
+      latestMonthEnd: "2026-05-01",
+      accounts: [{ account: "Everyday account", currencies: ["AED"] }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new ApiClient().getWorkspaceContext()).resolves.toEqual({
+      firstTransactionDate: "2026-01-01",
+      lastTransactionDate: "2026-04-30",
+      latestMonthStart: "2026-04-01",
+      latestMonthEnd: "2026-05-01",
+      accounts: [{ account: "Everyday account", currencies: ["AED"] }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/workspace-context", undefined);
+  });
 });

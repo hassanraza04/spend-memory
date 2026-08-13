@@ -22,6 +22,13 @@ export type CurrencyFlow = {
 export type TrendBucket = CurrencyFlow & { period_start: string };
 
 export type WorkspaceLens = { lens: CurrencyFlow[]; trend: TrendBucket[] };
+export type WorkspaceContext = {
+  firstTransactionDate: string | null;
+  lastTransactionDate: string | null;
+  latestMonthStart: string | null;
+  latestMonthEnd: string | null;
+  accounts: { account: string; currencies: string[] }[];
+};
 
 export type Transaction = {
   transaction_id: string;
@@ -101,6 +108,10 @@ export class ApiClient {
 
   async getLens(scope: TransactionScope = {}): Promise<WorkspaceLens> {
     return this.request<WorkspaceLens>(`/lens${query(scope)}`);
+  }
+
+  async getWorkspaceContext(): Promise<WorkspaceContext> {
+    return this.request<WorkspaceContext>("/workspace-context");
   }
 
   async searchTransactions(scope: TransactionScope): Promise<SearchResult> {

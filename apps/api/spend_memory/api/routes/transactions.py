@@ -7,6 +7,7 @@ from spend_memory.api.contracts import (
     SourceEvidenceResponse,
     TransactionFilters,
     TransactionResponse,
+    WorkspaceContextResponse,
 )
 from spend_memory.api.dependencies import get_enrichment_repository
 from spend_memory.api.errors import ApiError
@@ -15,6 +16,13 @@ from spend_memory.enrichment.repository import EnrichmentRepository
 from spend_memory.enrichment.search import SearchRow, search_transactions
 
 router = APIRouter()
+
+
+@router.get("/workspace-context", response_model=WorkspaceContextResponse)
+def get_workspace_context(
+    repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+) -> WorkspaceContextResponse:
+    return WorkspaceContextResponse(**repository.workspace_context())
 
 
 def serialize_transaction(row: SearchRow) -> TransactionResponse:

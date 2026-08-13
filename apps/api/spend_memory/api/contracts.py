@@ -153,6 +153,21 @@ class WorkspaceLensResponse(BaseModel):
     trend: tuple[TrendBucketResponse, ...]
 
 
+class WorkspaceAccountResponse(BaseModel):
+    account: str
+    currencies: tuple[str, ...]
+
+
+class WorkspaceContextResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    first_transaction_date: date | None = Field(alias="firstTransactionDate")
+    last_transaction_date: date | None = Field(alias="lastTransactionDate")
+    latest_month_start: date | None = Field(alias="latestMonthStart")
+    latest_month_end: date | None = Field(alias="latestMonthEnd")
+    accounts: tuple[WorkspaceAccountResponse, ...]
+
+
 class SearchResponse(BaseModel):
     query: str
     items: list[TransactionResponse]

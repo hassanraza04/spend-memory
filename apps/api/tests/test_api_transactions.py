@@ -42,6 +42,17 @@ class _Rows:
         ]
 
 
+class _WorkspaceRows:
+    def workspace_context(self) -> dict[str, object]:
+        return {
+            "first_transaction_date": date(2026, 1, 1),
+            "last_transaction_date": date(2026, 4, 30),
+            "latest_month_start": date(2026, 4, 1),
+            "latest_month_end": date(2026, 5, 1),
+            "accounts": [{"account": "Everyday account", "currencies": ("AED",)}],
+        }
+
+
 def _client(tmp_path: Path) -> TestClient:
     app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
     app.dependency_overrides[get_enrichment_repository] = _Rows
@@ -79,6 +90,77 @@ def test_transactions_page_trusted_rows_and_source_evidence(tmp_path: Path) -> N
         "limit": 1,
         "offset": 1,
         "total": 2,
+    }
+
+
+def test_workspace_context_exposes_dates_and_account_currencies(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _WorkspaceRows
+
+    response = TestClient(app).get("/api/v1/workspace-context")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "firstTransactionDate": "2026-01-01",
+        "lastTransactionDate": "2026-04-30",
+        "latestMonthStart": "2026-04-01",
+        "latestMonthEnd": "2026-05-01",
+        "accounts": [{"account": "Everyday account", "currencies": ["AED"]}],
+    }
+
+
+def test_workspace_context_reads_ordered_values_from_the_trusted_mart(tmp_path: Path) -> None:
+    database_path = tmp_path / "spend-memory.duckdb"
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("CREATE SCHEMA analytics")
+        connection.execute(
+            """
+            CREATE TABLE analytics.mart_transactions (
+                transaction_date DATE,
+                account_identity VARCHAR,
+                currency VARCHAR
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO analytics.mart_transactions VALUES (?, ?, ?)",
+            [
+                [date(2026, 4, 30), "Savings", "USD"],
+                [date(2026, 1, 1), "Everyday account", "USD"],
+                [date(2026, 4, 1), "Everyday account", "AED"],
+                [date(2026, 2, 14), "Savings", "AED"],
+            ],
+        )
+
+    response = TestClient(create_app(database_path, tmp_path / "documents")).get(
+        "/api/v1/workspace-context"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "firstTransactionDate": "2026-01-01",
+        "lastTransactionDate": "2026-04-30",
+        "latestMonthStart": "2026-04-01",
+        "latestMonthEnd": "2026-05-01",
+        "accounts": [
+            {"account": "Everyday account", "currencies": ["AED", "USD"]},
+            {"account": "Savings", "currencies": ["AED", "USD"]},
+        ],
+    }
+
+
+def test_workspace_context_is_empty_when_the_trusted_mart_is_unavailable(tmp_path: Path) -> None:
+    response = TestClient(
+        create_app(tmp_path / "spend-memory.duckdb", tmp_path / "documents")
+    ).get("/api/v1/workspace-context")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "firstTransactionDate": None,
+        "lastTransactionDate": None,
+        "latestMonthStart": None,
+        "latestMonthEnd": None,
+        "accounts": [],
     }
 
 

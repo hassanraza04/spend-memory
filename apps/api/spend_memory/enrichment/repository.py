@@ -544,6 +544,52 @@ class EnrichmentRepository:
             ) in rows
         ]
 
+    def workspace_context(self) -> dict[str, object]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                first_date, last_date = connection.execute(
+                    "SELECT min(transaction_date), max(transaction_date) FROM analytics.mart_transactions"
+                ).fetchone()
+                rows = connection.execute(
+                    """
+                    SELECT account_identity, currency
+                    FROM analytics.mart_transactions
+                    GROUP BY account_identity, currency
+                    ORDER BY account_identity, currency
+                    """
+                ).fetchall()
+        except duckdb.CatalogException:
+            return {
+                "first_transaction_date": None,
+                "last_transaction_date": None,
+                "latest_month_start": None,
+                "latest_month_end": None,
+                "accounts": (),
+            }
+        accounts: dict[str, list[str]] = {}
+        for account, currency in rows:
+            accounts.setdefault(account, []).append(currency)
+        latest_month_start = None if last_date is None else last_date.replace(day=1)
+        latest_month_end = (
+            None
+            if latest_month_start is None
+            else date(
+                latest_month_start.year + (latest_month_start.month == 12),
+                latest_month_start.month % 12 + 1,
+                1,
+            )
+        )
+        return {
+            "first_transaction_date": first_date,
+            "last_transaction_date": last_date,
+            "latest_month_start": latest_month_start,
+            "latest_month_end": latest_month_end,
+            "accounts": tuple(
+                {"account": account, "currencies": tuple(currencies)}
+                for account, currencies in accounts.items()
+            ),
+        }
+
     def replace_merchant_annotations(
         self, matches: dict[UUID, MerchantMatch]
     ) -> None:
