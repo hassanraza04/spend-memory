@@ -6,6 +6,29 @@ Spend Memory turns local financial statements into a private, searchable transac
 
 This is a portfolio and learning project, not a production financial service. It has no accounts, cloud storage, bank connections, payments, analytics trackers, or remote model calls.
 
+## First run on macOS
+
+Spend Memory runs locally through Docker Desktop. On a new Mac, install the
+required tools and start Docker Desktop before opening the project:
+
+```sh
+brew install uv node
+npm install --global pnpm@11.9.0
+brew install --cask docker
+open -a Docker
+```
+
+Wait for Docker Desktop to report that it is running, then confirm the setup:
+
+```sh
+docker --version
+docker compose version
+uv --version
+pnpm --version
+```
+
+If Homebrew is not installed, install it from [brew.sh](https://brew.sh) first.
+
 ## Try the synthetic demo
 
 The checked-in demo is invented. It includes CSV and PDF statements, a scanned PDF for the local OCR path, known recurring payments, a duplicate candidate, and reconciliation controls.
@@ -17,6 +40,15 @@ make dev
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then choose **Explore the synthetic demo**. Docker Compose binds both services to loopback only. Use `make clean-demo` to remove its local Docker volume.
+
+If a command is missing, run the matching command from **First run on macOS**.
+If Docker is installed but unavailable, open Docker Desktop and wait for it to
+finish starting. If a previous local run is still holding a port, stop it with
+`docker compose down`, then run `make dev` again.
+
+`make clean-demo` permanently removes all local Spend Memory data in Docker,
+including any real statements you imported. Use it only when you want a fresh
+workspace.
 
 ## What it does
 
