@@ -10,9 +10,9 @@ RUN pnpm install --frozen-lockfile
 
 COPY apps/web ./apps/web
 
+ENV SPEND_MEMORY_API_URL=http://api:8000
 RUN pnpm --dir apps/web build
 
 EXPOSE 3000
 
 CMD ["pnpm", "--dir", "apps/web", "start", "--hostname", "0.0.0.0"]
-
