@@ -1,49 +1,84 @@
-# Task 8 report
+# Task 8 report: show result summaries
 
-## Changes
+## Result
 
-- Added Playwright as the only new development dependency after confirming the runner was absent.
-- Added a production-mode local browser harness. It starts the API and web app against one isolated synthetic DuckDB directory per worker.
-- Added real browser journeys for the synthetic demo, CSV and scanned-PDF import, duplicate retry, recurring evidence, merchant correction and alias reuse, duplicate evidence, exact comparison, CSV export, and exact local-data deletion.
-- Added four checked-in viewport snapshots: wide desktop, laptop, tablet, and narrow mobile.
-- Added `make e2e` and the matching CI browser-workflow step. CI installs Chromium before running the local workflows.
+The activity ledger now renders a quiet, accessible `Result summary` region after its table and before the trusted-entry count. It receives the already-loaded `WorkspaceLens` from the page and reuses `LensSummary` unchanged for each currency. The summary says it covers all matching entries. An empty result retains the existing empty message and adds `0 matching entries.` without a money value.
 
-## Real issues found and fixed
+## RED and GREEN evidence
 
-- First-run actions could begin before the local workspace check completed. The actions stay disabled until that check returns.
-- Demo rows did not match the existing reconciliation control, so they never became trusted activity. The demo now uses the reconciled synthetic January statement.
-- Mixed DuckDB connection modes could fail active local API reads. The browser-used evidence reads now use the same local connection mode.
-- The real merchant-evidence query had an ambiguous join. It now joins the annotation merchant id explicitly.
+### RED
 
-## TDD evidence
+Added the focused ledger tests before production changes. The project-local Vitest run reported two expected failures and three existing passes:
 
-- `pnpm --dir apps/web exec playwright test` first failed because Playwright was not installed.
-- The first real demo journey exposed the first-run race and the unreconciled demo data.
-- Focused API tests first failed on the DuckDB connection conflict and then on the merchant-evidence join.
-- The browser review journey verified the correction is stored locally and is reused by a subsequent real enrichment refresh.
+```text
+Unable to find an accessible element with the role "region" and name "Result summary"
+Test Files 1 failed
+Tests 2 failed | 3 passed
+```
 
-## Verification
+The supplied page test also required this missing region for a search response whose server lens differed from the one rendered row.
 
-- `make lint` passed. The web linter still emits the existing `baseline-browser-mapping` freshness advisory.
-- `pnpm --dir apps/web test` passed: 18 files, 51 tests.
-- `UV_CACHE_DIR=.uv-cache uv run pytest -q` completed with 242 collected API tests and no recorded pytest failures.
-- `pnpm --dir apps/web exec playwright test --reporter=list` passed: 8 of 8 workflows.
-- The critical demo, import, export, and deletion workflows passed five repeats: 25 of 25.
-- `git diff --check` passed.
+### GREEN
 
-## Visual review
+```text
+node_modules/.bin/vitest run src/app/page.test.tsx src/components/transaction-ledger.test.tsx --reporter=dot
+Test Files 2 passed
+Tests 20 passed
 
-I inspected the wide desktop, laptop, tablet, and narrow mobile snapshots. The hierarchy, totals, and controls remain readable. The mobile navigation is intentionally horizontally scrollable, and the ledger uses its existing horizontal scroll behavior rather than compressing financial columns.
+node_modules/.bin/eslint .
+passed
 
-## Ponytail review
+node_modules/.bin/next build
+compiled, type-checked, and generated static pages
 
-The work reuses the existing local API, dbt project, synthetic fixtures, browser controls, and CSS. No mock server, test data service, chart package, screenshot service, or extra runtime dependency was added. The only new package is the required free Playwright test runner.
+git diff --check
+passed
+```
 
-## Review repair
+The focused browser test also passed after a real UI search:
 
-- Screenshot paths are platform-specific. The reviewed macOS files are `*-darwin.png`; GitHub Actions generated the four distinct `*-linux.png` baselines on `ubuntu-latest` in [run 31000360254](https://github.com/hassanraza04/spend-memory/actions/runs/31000360254).
-- The comparison journey now asserts exact rendered earlier, later, and change totals, plus the named contributor rows and their evidence counts.
-- The export journey reads the downloaded CSV. It checks the scoped row count, known included and excluded records, and formula neutralization of a real local counterparty label beginning with `=`.
-- The merchant journey now selects one specific suggested transaction by test id, saves `METRO MART`, refreshes enrichment, and proves that a specific `metro mart` transaction returns as `METROMART POS` through the `confirmed_alias` method.
-- Currency flow summaries now expose one accessible name per currency, so the demo journey scopes its exact AED values without a CSS selector.
-- Local verification after the repair passed: full Playwright suite 8 of 8, five repeats of all 8 workflows for 40 of 40, web units 51 of 51, lint, and `git diff --check`. The controlled Ubuntu run generated the Linux snapshots successfully; regular Ubuntu CI is then used to verify them without snapshot updates.
+```text
+node_modules/.bin/playwright test tests/e2e/demo.spec.ts --grep "complete API-derived"
+1 passed
+```
+
+## Source-of-totals proof
+
+- `Page` already stores the search response as `{ lens: result.lens, trend: [] }` and the normal response as `api.getLens(scope)`.
+- `page.tsx` passes that loaded `WorkspaceLens` directly to `TransactionLedger`.
+- `TransactionLedger` passes only `lens.lens` to the existing `LensSummary` component.
+- `LensSummary` remains the only renderer of sent, received, net, and count values. It uses the existing `formatMoney` formatter.
+- The page test supplies one AED 12.00 visible row but a two-currency API lens with AED 12.34 sent, AED 5.67 received, AED -6.67 net, two entries, and USD $8.90. The rendered summary asserts those lens values. There is no client money arithmetic.
+
+## Tests added or retained
+
+- Page test: search lens values render even when they differ from the visible row.
+- Ledger test: semantic region is after the table and before the entry count, names all matching entries, and renders AED and USD flows.
+- Ledger test: an empty page says zero matching entries and contains no fabricated currency or decimal money value.
+- E2E test: a person searches demo activity through the existing filter UI and sees the result-summary region. It does not assert static fixture totals or bypass the UI flow.
+
+## Exact staged paths and commit
+
+- `.superpowers/sdd/task-8-report.md`
+- `apps/web/src/app/globals.css`
+- `apps/web/src/app/page.test.tsx`
+- `apps/web/src/app/page.tsx`
+- `apps/web/src/components/transaction-ledger.test.tsx`
+- `apps/web/src/components/transaction-ledger.tsx`
+- `apps/web/tests/e2e/demo.spec.ts`
+
+Commit subject: `show result summaries`.
+
+## Self-review and concerns
+
+The change adds no route, data store, formatter, dependency, money calculation, or API call. It reuses the loaded API lens and existing summary cards. The zero-result branch intentionally reads only the API page total and does not infer amounts.
+
+The requested `pnpm` wrapper does not produce a conclusive direct run in this terminal, and the unchanged Playwright web-server command exits 3 through that wrapper. Equivalent project-local binaries passed the unit, lint, and build checks. The focused E2E test passed with the same local API and production web servers started manually. The full existing demo spec still has a non-Task-8 failure: its first test expects January after `resetDemo(page, "")`, but this environment routes to the available April scope.
+
+## Pagination review repair
+
+Reviewer feedback identified that search pages can have no visible rows while their API lens remains non-empty. Page metadata is therefore not authoritative for the result summary.
+
+- RED: new page and ledger tests supplied `page.items: []`, `page.total: 0`, and an AED API lens with two matching entries. Both failed because the region rendered `0 matching entries.` instead of the AED lens total.
+- GREEN: `TransactionLedger` now uses `lens.lens.length` to select `LensSummary`; it shows `0 matching entries.` only when the API lens is empty.
+- Fresh verification: focused page and ledger tests passed, 22 tests total; ESLint, production build, and `git diff --check` passed.

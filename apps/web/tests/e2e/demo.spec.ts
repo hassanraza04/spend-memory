@@ -22,6 +22,20 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*56\.15/);
 });
 
+test("shows the complete API-derived result summary after searching demo activity", async ({ page, freshRecord }) => {
+  await freshRecord();
+  await resetDemo(page);
+
+  await page.getByLabel("Search activity").fill("Fuel");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByRole("row", { name: /ORBIT FUEL/ })).toBeVisible();
+
+  const summary = page.getByRole("region", { name: "Result summary" });
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText(/all matching entries/i);
+  await expect(summary).toContainText("AED");
+});
+
 test("keeps the personal record readable at each supported viewport", async ({ page, freshRecord }, testInfo) => {
   expect(testInfo.snapshotPath("wide-desktop.png", { kind: "screenshot" })).toMatch(new RegExp(`wide-desktop-${process.platform}\\.png$`));
   await freshRecord();

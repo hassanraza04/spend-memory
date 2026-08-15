@@ -199,6 +199,9 @@ tbody tr:hover, tbody tr[aria-selected="true"] { background: color-mix(in srgb, 
 td strong, td span { display: block; }
 td span { max-width: 250px; overflow: hidden; color: var(--muted); font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
 .ledger-count { margin: 0.65rem 0; font-size: 0.84rem; }
+.result-summary { margin-top: 1rem; }
+.result-summary > p { margin-bottom: 0.45rem; color: var(--muted); font-size: 0.84rem; }
+.result-summary .lens-summary { margin: 0; }
 .source-panel, .counterparty-editor { margin-top: 1rem; padding: 1rem; }
 .close-button { border: 0; color: var(--evidence); background: transparent; font-weight: 800; cursor: pointer; }
 .evidence-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.8rem; margin: 1rem 0; }

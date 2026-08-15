@@ -17,6 +17,7 @@ const rows = [{
   state: "confirmed",
   source: { document: "august.csv", ordinal: 7, page: null, row: 14, text: "Rina lunch", extraction_confidence: 0.98 },
 }];
+const emptyLens = { lens: [], trend: [] };
 
 describe("TransactionLedger", () => {
   it("submits text and account filters, then keeps the selected row keyboard reachable", () => {
@@ -25,6 +26,7 @@ describe("TransactionLedger", () => {
     render(
       <TransactionLedger
         page={{ items: rows, total: 1, limit: 50, offset: 0 }}
+        lens={emptyLens}
         state={{ after: "2026-08-01", before: "2026-09-01", sort: "date", order: "desc" }}
         onScopeChange={onScopeChange}
         onSelect={onSelect}
@@ -47,6 +49,7 @@ describe("TransactionLedger", () => {
     render(
       <TransactionLedger
         page={{ items: rows, total: 1, limit: 50, offset: 0 }}
+        lens={emptyLens}
         state={{}}
         onScopeChange={vi.fn()}
         onSelect={vi.fn()}
@@ -61,9 +64,49 @@ describe("TransactionLedger", () => {
 
   it("does not open source evidence when Space toggles a grouping checkbox", () => {
     const onSelect = vi.fn();
-    render(<TransactionLedger page={{ items: rows, total: 1, limit: 50, offset: 0 }} state={{}} onScopeChange={vi.fn()} onSelect={onSelect} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
+    render(<TransactionLedger page={{ items: rows, total: 1, limit: 50, offset: 0 }} lens={emptyLens} state={{}} onScopeChange={vi.fn()} onSelect={onSelect} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
 
     fireEvent.keyDown(screen.getByRole("checkbox", { name: "Group Rina lunch" }), { key: " " });
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("places the API result summary after the table and before the entry count", () => {
+    const { container } = render(
+      <TransactionLedger
+        page={{ items: rows, total: 1, limit: 1, offset: 0 }}
+        lens={{ lens: [{ currency: "AED", sent_minor: 1234, received_minor: 567, net_minor: -667, transaction_count: 2 }, { currency: "USD", sent_minor: 890, received_minor: 0, net_minor: -890, transaction_count: 1 }], trend: [] }}
+        state={{}}
+        onScopeChange={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByRole("region", { name: "Result summary" });
+    expect(summary.textContent).toMatch(/all matching entries/i);
+    expect(summary.textContent).toContain("AED");
+    expect(summary.textContent).toContain("AED 12.34");
+    expect(summary.textContent).toContain("AED 5.67");
+    expect(summary.textContent).toContain("-AED 6.67");
+    expect(summary.textContent).toContain("USD");
+    expect(summary.textContent).toContain("$8.90");
+    expect(container.querySelector("table")?.compareDocumentPosition(summary)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(summary.compareDocumentPosition(screen.getByText("1 trusted entry"))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("summarizes zero matching entries without fabricating money", () => {
+    render(<TransactionLedger page={{ items: [], total: 0, limit: 50, offset: 0 }} lens={{ lens: [], trend: [] }} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} />);
+
+    const summary = screen.getByRole("region", { name: "Result summary" });
+    expect(summary.textContent).toContain("0 matching entries");
+    expect(summary.textContent).not.toMatch(/AED|USD|\d+\.\d{2}/);
+  });
+
+  it("keeps API lens totals when the visible search page is empty", () => {
+    render(<TransactionLedger page={{ items: [], total: 0, limit: 1, offset: 1 }} lens={{ lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }], trend: [] }} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} />);
+
+    const summary = screen.getByRole("region", { name: "Result summary" });
+    expect(summary.textContent).toContain("AED 12.34");
+    expect(summary.textContent).toContain("Entries2");
+    expect(summary.textContent).not.toContain("0 matching entries");
   });
 });

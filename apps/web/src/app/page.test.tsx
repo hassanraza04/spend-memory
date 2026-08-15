@@ -227,6 +227,44 @@ describe("home page", () => {
     expect(await screen.findByText("An earlier matching period is needed before this month can be compared.")).toBeTruthy();
   });
 
+  it("renders a search result summary from the API lens without totaling visible rows", async () => {
+    window.history.replaceState({}, "", "/?q=MetroMart&after=2026-01-01&before=2026-02-01");
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000001", transaction_date: "2026-01-01", account: "Daily", description: "MetroMart POS", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed", source: { document: "january.csv", ordinal: 1, page: null, row: 2, text: "MetroMart POS", extraction_confidence: 0.98 },
+    };
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/search")
+        ? { query: "MetroMart", items: [transaction], lens: [{ currency: "AED", sent_minor: 1234, received_minor: 567, net_minor: -667, transaction_count: 2 }, { currency: "USD", sent_minor: 890, received_minor: 0, net_minor: -890, transaction_count: 1 }] }
+        : { items: [transaction], total: 1, limit: 1, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    const summary = await screen.findByRole("region", { name: "Result summary" });
+    expect(summary.textContent).toContain("AED");
+    expect(summary.textContent).toContain("USD");
+    expect(summary.textContent).toContain("12.34");
+    expect(summary.textContent).toContain("5.67");
+    expect(summary.textContent).toContain("-AED 6.67");
+    expect(summary.textContent).toContain("$8.90");
+  });
+
+  it("keeps a search lens summary when its visible page has no rows", async () => {
+    window.history.replaceState({}, "", "/?q=MetroMart&after=2026-01-01&before=2026-02-01&offset=1");
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/search")
+        ? { query: "MetroMart", items: [], lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }] }
+        : { items: [{}], total: 1, limit: 1, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    const summary = await screen.findByRole("region", { name: "Result summary" });
+    expect(summary.textContent).toContain("AED 12.34");
+    expect(summary.textContent).toContain("Entries2");
+    expect(summary.textContent).not.toContain("0 matching entries");
+  });
+
   it("restores URL-selected source evidence after loading its row", async () => {
     window.history.replaceState({}, "", "/?selected=00000000-0000-0000-0000-000000000001");
     const transaction = {

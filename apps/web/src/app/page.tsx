@@ -163,7 +163,7 @@ export default function Page() {
         {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} loadError={merchantError} />}
         {view === "patterns" && <><RecurringView flows={lens.lens} recurring={recurring} loadError={recurringError} /><ReviewView flows={lens.lens} review={review} loadError={reviewError} /></>}
         {view === "compare" && comparisonView}
-        {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
+        {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} lens={lens} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
         {activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
         {groupIds.length > 0 && <CounterpartyEditor transactionIds={groupIds} descriptor={groupIds.length === 1 ? activeSelected?.description ?? "" : ""} onSaved={() => setActivityRevision((value) => value + 1)} />}
       </>}
