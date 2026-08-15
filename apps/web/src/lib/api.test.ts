@@ -59,4 +59,39 @@ describe("ApiClient", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/workspace-context", undefined);
   });
+
+  it("lists typed people and places with the shared query scope", async () => {
+    const grouped = {
+      items: [{
+        key: "merchant:11111111-1111-1111-1111-111111111111",
+        label: "MetroMart",
+        kind: "place",
+        status: "confirmed",
+        transactionCount: 3,
+        lastActivityDate: "2026-04-12",
+        flows: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 3 }],
+        recentTransactionIds: ["22222222-2222-2222-2222-222222222222"],
+      }],
+      limit: 50,
+      offset: 0,
+      total: 1,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(grouped), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new ApiClient().listPeoplePlaces({
+      after: "2026-04-01",
+      before: "2026-05-01",
+      account: "Everyday",
+      currency: "AED",
+      direction: "debit",
+      query: "metro",
+    });
+
+    expect(result).toEqual(grouped);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/people-places?after=2026-04-01&before=2026-05-01&account=Everyday&currency=AED&direction=debit&query=metro",
+      undefined,
+    );
+  });
 });

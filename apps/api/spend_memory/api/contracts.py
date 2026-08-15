@@ -62,6 +62,11 @@ class EntityStatus(StrEnum):
     unresolved = "unresolved"
 
 
+class Direction(StrEnum):
+    debit = "debit"
+    credit = "credit"
+
+
 class TransactionQuery(PageRequest):
     sort: TransactionSort = TransactionSort.date
     order: SortOrder = SortOrder.descending
@@ -71,19 +76,26 @@ class EntityQuery(PageRequest):
     sort: EntitySort = EntitySort.label
     order: SortOrder = SortOrder.ascending
     status: EntityStatus | None = None
+    after: date | None = None
+    before: date | None = None
+    account: str | None = None
+    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    direction: Direction | None = None
+    query: str | None = None
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "EntityQuery":
+        if self.after is not None and self.before is not None and self.after >= self.before:
+            raise ValueError("after_must_precede_before")
+        return self
 
 
 class CategoryQuery(EntityQuery):
-    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    pass
 
 
 class TransactionPath(BaseModel):
     transaction_id: UUID
-
-
-class Direction(StrEnum):
-    debit = "debit"
-    credit = "credit"
 
 
 class SourceEvidenceResponse(BaseModel):
@@ -276,6 +288,19 @@ class CategoryResponse(BaseModel):
     category_id: UUID
     label: str
     lens: tuple[CurrencyFlowResponse, ...]
+
+
+class PeoplePlaceResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    key: str
+    label: str
+    kind: Literal["person", "place", "unresolved"]
+    status: Literal["confirmed", "unresolved"]
+    transaction_count: int = Field(alias="transactionCount", ge=1)
+    last_activity_date: date = Field(alias="lastActivityDate")
+    flows: tuple[CurrencyFlowResponse, ...]
+    recent_transaction_ids: tuple[UUID, ...] = Field(alias="recentTransactionIds")
 
 
 class RecurringCandidateResponse(BaseModel):

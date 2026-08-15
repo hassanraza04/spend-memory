@@ -40,6 +40,7 @@ class MerchantEvidence:
     confidence: float
     method: str
     evidence: dict[str, str | int | float]
+    transaction_date: date
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,21 @@ class EnrichmentRepository:
                 "SELECT counterparty_id, label FROM counterparties ORDER BY label, counterparty_id"
             ).fetchall()
         return [Counterparty(*row) for row in rows]
+
+    def list_counterparty_assignments(self) -> dict[UUID, UUID]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT assignments.raw_transaction_id, assignments.counterparty_id
+                    FROM transaction_counterparty_assignments AS assignments
+                    JOIN analytics.mart_transactions AS transactions
+                        USING (raw_transaction_id)
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return dict(rows)
 
     def list_counterparty_transactions(
         self, counterparty_id: UUID
@@ -868,7 +884,8 @@ class EnrichmentRepository:
                     """
                     SELECT transactions.raw_transaction_id, annotations.merchant_id AS merchant_id,
                         merchants.merchant_name, annotations.resolution_status,
-                        annotations.confidence, annotations.method, annotations.evidence_json
+                        annotations.confidence, annotations.method, annotations.evidence_json,
+                        transactions.transaction_date
                     FROM analytics.mart_transactions AS transactions
                     JOIN transaction_merchant_annotations AS annotations
                         USING (raw_transaction_id)
@@ -882,9 +899,12 @@ class EnrichmentRepository:
         return [
             MerchantEvidence(
                 transaction_id, merchant_id, merchant_name, status, confidence, method,
-                json.loads(evidence),
+                json.loads(evidence), transaction_date,
             )
-            for transaction_id, merchant_id, merchant_name, status, confidence, method, evidence in rows
+            for (
+                transaction_id, merchant_id, merchant_name, status, confidence, method,
+                evidence, transaction_date,
+            ) in rows
         ]
 
     def list_recurring_evidence(self) -> list[RecurringEvidence]:
