@@ -181,6 +181,52 @@ describe("home page", () => {
     expect(screen.queryByRole("button", { name: "Import a statement" })).toBeNull();
   });
 
+  it("defaults comparison to the first valid context pair and requests the preceding period", async () => {
+    window.history.replaceState({}, "", "/?view=compare&after=2026-04-01&before=2026-05-01");
+    const requests: string[] = [];
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      const path = String(url);
+      requests.push(path);
+      return Promise.resolve(new Response(JSON.stringify(
+        path.includes("/workspace-context")
+          ? { firstTransactionDate: "2026-03-15", lastTransactionDate: "2026-04-30", latestMonthStart: "2026-04-01", latestMonthEnd: "2026-05-01", accounts: [{ account: "Daily", currencies: ["AED", "USD"] }, { account: "Savings", currencies: ["AED"] }] }
+          : path.includes("/comparisons")
+            ? { before_net_amount_minor: -1000, after_net_amount_minor: -700, difference_net_amount_minor: 300, contribution_total_minor: 300, remainder_minor: 0, text: "Spending changed by AED 3.00.", contributions: [{ label: "Cafe North", amount_minor: 300, before_transaction_ids: ["a"], after_transaction_ids: ["b"] }], before_transaction_ids: ["a"], after_transaction_ids: ["b"] }
+            : path.includes("/lens")
+              ? { lens: [], trend: [] }
+              : { items: [{}], total: 1, limit: 1, offset: 0 },
+      ), { status: 200 }));
+    }));
+
+    render(<Page />);
+
+    expect(await screen.findByText("Spending changed by AED 3.00.")).toBeTruthy();
+    expect(window.location.search).toContain("account=Daily");
+    expect(window.location.search).toContain("currency=AED");
+    expect(replaceState).toHaveBeenCalledOnce();
+    expect(requests.filter((path) => path.includes("/comparisons"))).toEqual([
+      "/api/v1/comparisons?before_start=2026-03-02&before_end=2026-04-01&after_start=2026-04-01&after_end=2026-05-01&account=Daily&currency=AED",
+    ]);
+  });
+
+  it("explains when the comparison endpoint finds no matching earlier period", async () => {
+    window.history.replaceState({}, "", "/?view=compare&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED");
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/workspace-context")
+        ? { firstTransactionDate: "2026-01-01", lastTransactionDate: "2026-04-30", latestMonthStart: "2026-04-01", latestMonthEnd: "2026-05-01", accounts: [{ account: "Daily", currencies: ["AED"] }] }
+        : String(url).includes("/comparisons")
+          ? { error: { code: "comparison_unavailable", message: "The selected periods cannot be compared." } }
+          : String(url).includes("/lens")
+            ? { lens: [], trend: [] }
+            : { items: [{}], total: 1, limit: 1, offset: 0 },
+    ), { status: String(url).includes("/comparisons") ? 422 : 200 }))));
+
+    render(<Page />);
+
+    expect(await screen.findByText("An earlier matching period is needed before this month can be compared.")).toBeTruthy();
+  });
+
   it("restores URL-selected source evidence after loading its row", async () => {
     window.history.replaceState({}, "", "/?selected=00000000-0000-0000-0000-000000000001");
     const transaction = {

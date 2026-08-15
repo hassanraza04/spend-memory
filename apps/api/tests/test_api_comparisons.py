@@ -45,3 +45,29 @@ def test_comparison_rejects_overlapping_periods(tmp_path: Path) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_filter"
+
+
+def test_demo_reset_returns_exact_april_versus_march_explanation(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data"))
+
+    assert client.post("/api/v1/demo/reset").status_code == 200
+    response = client.get(
+        "/api/v1/comparisons"
+        "?before_start=2026-03-01&before_end=2026-04-01"
+        "&after_start=2026-04-01&after_end=2026-05-01"
+        "&account=AED-SYNTH-001&currency=AED"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["difference_net_amount_minor"] == -36243
+    assert [
+        (item["label"], item["amount_minor"]) for item in body["contributions"]
+    ] == [("Quick Cart", -26920), ("nova bazaar", -17800), ("transfer received", 12500)]
+    assert body["text"] == (
+        "Net activity was 36243 minor units lower than the previous period. "
+        "Quick Cart accounted for 26920 minor units. "
+        "nova bazaar accounted for 17800 minor units. "
+        "transfer received accounted for 12500 minor units. "
+        "Other activity accounted for 4023 minor units."
+    )
