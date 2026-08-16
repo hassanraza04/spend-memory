@@ -39,6 +39,11 @@ function comparisonScope(state: WorkspaceState, context?: WorkspaceContext): Rec
   return { before_start: beforeStart, before_end: after, after_start: after, after_end: before, account, currency };
 }
 
+function scopeHeading(state: WorkspaceState): string {
+  const period = state.after && state.before ? `${state.after} to ${state.before}` : state.after ? `From ${state.after}` : state.before ? `Before ${state.before}` : "All local activity";
+  return [period, state.account && `Account: ${state.account}`, state.currency && `Currency: ${state.currency}`, state.direction && `Direction: ${state.direction}`].filter(Boolean).join(" · ");
+}
+
 export default function Page() {
   const [state, setState] = useState<WorkspaceState>(() => typeof window === "undefined" ? {} : workspaceStateFrom(new URLSearchParams(window.location.search)));
   const view = typeof window === "undefined" ? "this-month" : workspaceViewFrom(new URLSearchParams(window.location.search));
@@ -108,8 +113,8 @@ export default function Page() {
     let current = true;
     if (view === "people-places") void api.listPeoplePlaces(peoplePlacesScope(state)).then((nextPeoplePlaces) => { if (current) { setPeoplePlaces(nextPeoplePlaces.items); setPeoplePlacesError(undefined); } }).catch((error) => { if (current) setPeoplePlacesError(localErrorMessage(error, "People and places could not be loaded from the local record.")); });
     if (view === "patterns") {
-      void api.listRecurring().then((nextRecurring) => { if (current) { setRecurring(nextRecurring.items); setRecurringError(undefined); } }).catch((error) => { if (current) setRecurringError(localErrorMessage(error, "Recurring data could not be loaded.")); });
-      void api.listReview().then((nextReview) => { if (current) { setReview(nextReview.items); setReviewError(undefined); } }).catch((error) => { if (current) setReviewError(localErrorMessage(error, "Review data could not be loaded.")); });
+      void api.listRecurring(peoplePlacesScope(state)).then((nextRecurring) => { if (current) { setRecurring(nextRecurring.items); setRecurringError(undefined); } }).catch((error) => { if (current) setRecurringError(localErrorMessage(error, "Recurring data could not be loaded.")); });
+      void api.listReview(peoplePlacesScope(state)).then((nextReview) => { if (current) { setReview(nextReview.items); setReviewError(undefined); } }).catch((error) => { if (current) setReviewError(localErrorMessage(error, "Review data could not be loaded.")); });
     }
     const periodScope = comparisonScope(state, workspaceContext);
     const periodKey = JSON.stringify(periodScope);
@@ -157,14 +162,15 @@ export default function Page() {
   const currentComparisonScope = comparisonScope(state, workspaceContext);
   const currentComparisonKey = JSON.stringify(currentComparisonScope);
   const currentComparisonError = comparisonError?.key === currentComparisonKey ? comparisonError : undefined;
-  const comparisonView = <ComparisonView accounts={workspaceContext?.accounts ?? []} account={state.account} currency={state.currency} hasWorkspace={hasWorkspace === true} hasPreviousPeriod={Object.keys(currentComparisonScope).length > 0 && !currentComparisonError?.missingPrevious} comparison={comparison?.key === currentComparisonKey ? comparison.value : undefined} loadError={currentComparisonError?.message} onScopeChange={changeScope} />;
+  const scope = scopeHeading(state);
+  const comparisonView = <ComparisonView accounts={workspaceContext?.accounts ?? []} account={state.account} currency={state.currency} scope={scope} hasWorkspace={hasWorkspace === true} hasPreviousPeriod={Object.keys(currentComparisonScope).length > 0 && !currentComparisonError?.missingPrevious} comparison={comparison?.key === currentComparisonKey ? comparison.value : undefined} loadError={currentComparisonError?.message} onScopeChange={changeScope} />;
   return (
     <AppShell>
       {view === "data" && hasWorkspace !== false ? <DataView scope={apiScope(state)} onDeleted={leaveDemoWorkspace} /> : view === "compare" && hasWorkspace === false ? comparisonView : !hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={refreshWorkspaceContext} /> : <>
-        {view === "this-month" && <MonthOverview lens={lens} state={state} />}
-        {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
-        {view === "people-places" && <MerchantView flows={lens.lens} peoplePlaces={peoplePlaces} onShowActivity={(patch) => changeScope(patch, "all-activity")} loadError={peoplePlacesError} />}
-        {view === "patterns" && <><RecurringView flows={lens.lens} recurring={recurring} loadError={recurringError} /><ReviewView flows={lens.lens} review={review} loadError={reviewError} /></>}
+        {view === "this-month" && <MonthOverview lens={lens} state={state} scope={scope} />}
+        {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="scope-note">Scope: {scope}</p><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
+        {view === "people-places" && <MerchantView scope={scope} flows={lens.lens} peoplePlaces={peoplePlaces} onShowActivity={(patch) => changeScope(patch, "all-activity")} loadError={peoplePlacesError} />}
+        {view === "patterns" && <><RecurringView scope={scope} recurring={recurring} loadError={recurringError} /><ReviewView review={review} loadError={reviewError} /></>}
         {view === "compare" && comparisonView}
         {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} lens={lens} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
         {(view === "this-month" || view === "all-activity") && activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}

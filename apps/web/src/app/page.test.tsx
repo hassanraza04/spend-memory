@@ -280,15 +280,36 @@ describe("home page", () => {
   });
 
   it("opens recurring patterns inside the retained record scope", async () => {
-    window.history.replaceState({}, "", "/?view=patterns&after=2026-08-01&before=2026-09-01");
-    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+    window.history.replaceState({}, "", "/?view=patterns&after=2026-08-01&before=2026-09-01&direction=debit&sort=amount&order=desc&limit=25&offset=50");
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      requests.push(String(url));
+      return Promise.resolve(new Response(JSON.stringify(
       String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("/recurring") ? { items: [{ candidate_id: "r1", label: "Music", cadence: "monthly", status: "suggested", confidence: 0.9, evidence: {}, transaction_ids: ["t1"], expected_next_start: "2026-09-01", expected_next_end: "2026-09-03" }], total: 1, limit: 100, offset: 0 } : String(url).includes("/review") ? { items: [], total: 0, limit: 100, offset: 0 } : { items: [{}], total: 1, limit: 1, offset: 0 },
-    ), { status: 200 }))));
+    ), { status: 200 }));
+    }));
 
     render(<Page />);
 
     expect(await screen.findByRole("heading", { name: "The payments that keep coming back" })).toBeTruthy();
+    expect(screen.getAllByText("Scope: 2026-08-01 to 2026-09-01 · Direction: debit")).toHaveLength(1);
     expect(await screen.findByText("Expected next: 2026-09-01 to 2026-09-03")).toBeTruthy();
+    expect(requests).toContain("/api/v1/recurring?after=2026-08-01&before=2026-09-01&direction=debit");
+    expect(requests).toContain("/api/v1/review?after=2026-08-01&before=2026-09-01&direction=debit");
+    expect(requests.filter((path) => path.includes("/recurring") || path.includes("/review"))).not.toEqual(expect.arrayContaining([expect.stringMatching(/[?&](sort|order|limit|offset)=/)]));
+  });
+
+  it("uses the shared scope label for all activity", async () => {
+    window.history.replaceState({}, "", "/?view=all-activity&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&direction=credit");
+    const transaction = { transaction_id: "00000000-0000-0000-0000-000000000201", transaction_date: "2026-04-10", account: "Daily", description: "Salary", currency: "AED", amount_minor: 50000, direction: "credit", merchant: null, category: "Income", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "Salary", extraction_confidence: 1 } };
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/lens") ? { lens: [], trend: [] } : { items: [transaction], total: 1, limit: 1, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    expect(await screen.findByRole("heading", { name: "All activity" })).toBeTruthy();
+    expect(screen.getByText("Scope: 2026-04-01 to 2026-05-01 · Account: Daily · Currency: AED · Direction: credit")).toBeTruthy();
   });
 
   it("loads people and places with the exact current API scope", async () => {
@@ -313,6 +334,7 @@ describe("home page", () => {
     render(<Page />);
 
     expect(await screen.findByRole("heading", { name: "Places and merchants" })).toBeTruthy();
+    expect(screen.getByText("Scope: 2026-04-01 to 2026-05-01 · Account: Daily · Currency: AED · Direction: debit")).toBeTruthy();
     expect(requests).toContain("/api/v1/people-places?after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&direction=debit&amount_min_minor=500&amount_max_minor=30000&merchant=MetroMart&category=Groceries&counterparty=Rina&state=unresolved&query=Coffee");
     expect(requests.filter((path) => path.includes("/people-places"))).not.toEqual(expect.arrayContaining([expect.stringMatching(/[?&](sort|order|limit|offset)=/)]));
     expect(requests.some((path) => path.includes("/merchants"))).toBe(false);

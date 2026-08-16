@@ -34,8 +34,10 @@ describe("ComparisonView", () => {
   });
 
   it("renders exact server contributions and a text waterfall alternative", () => {
-    render(<ComparisonView accounts={accounts} account="Daily" currency="AED" hasWorkspace hasPreviousPeriod onScopeChange={vi.fn()} comparison={{ before_net_amount_minor: -1000, after_net_amount_minor: -700, difference_net_amount_minor: 300, contribution_total_minor: 300, remainder_minor: 0, text: "Spending changed by AED 3.00.", contributions: [{ label: "Cafe North", amount_minor: 300, before_transaction_ids: ["a"], after_transaction_ids: ["b"] }], before_transaction_ids: ["a"], after_transaction_ids: ["b"] }} />);
+    render(<ComparisonView accounts={accounts} account="Daily" currency="AED" scope="April 2026" hasWorkspace hasPreviousPeriod onScopeChange={vi.fn()} comparison={{ before_net_amount_minor: -1000, after_net_amount_minor: -700, difference_net_amount_minor: 300, contribution_total_minor: 300, remainder_minor: 0, text: "Spending changed by AED 3.00.", contributions: [{ label: "Cafe North", amount_minor: 300, before_transaction_ids: ["a"], after_transaction_ids: ["b"] }], before_transaction_ids: ["a"], after_transaction_ids: ["b"] }} />);
 
+    expect(screen.getByText("Scope: April 2026")).toBeTruthy();
+    expect(screen.getByText((_, element) => element?.textContent === "Top contributor: Cafe North (AED 3.00).")).toBeTruthy();
     expect(screen.getAllByText("Cafe North")).toHaveLength(2);
     expect(screen.getByLabelText("Waterfall text alternative")).toBeTruthy();
     expect(screen.getAllByText((_, element) => element?.tagName === "TD" && element.textContent?.includes("3.00") === true)).toHaveLength(2);

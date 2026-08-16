@@ -12,11 +12,12 @@ describe("MonthOverview", () => {
           trend: [{ period_start: "2026-08-01", currency: "AED", sent_minor: 1200, received_minor: 200, net_minor: -1000, transaction_count: 2 }],
         }}
         state={{ after: "2026-08-01", before: "2026-09-01" }}
+        scope="2026-08-01 to 2026-09-01 · Direction: debit"
       />,
     );
 
     expect(screen.getByRole("heading", { name: "What happened this month?" })).toBeTruthy();
-    expect(screen.getByText("2026-08-01 to 2026-09-01")).toBeTruthy();
+    expect(screen.getByText("Scope: 2026-08-01 to 2026-09-01 · Direction: debit")).toBeTruthy();
     expect(screen.getByRole("img", { name: "AED monthly activity trend" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Compare these periods" })).toBeTruthy();
   });
@@ -32,6 +33,7 @@ describe("MonthOverview", () => {
           ],
         }}
         state={{ after: "2026-07-01", before: "2026-09-01" }}
+        scope="2026-07-01 to 2026-09-01"
       />,
     );
 

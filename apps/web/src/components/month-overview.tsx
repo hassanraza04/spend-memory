@@ -3,12 +3,11 @@ import { formatMoney } from "../lib/format";
 import { toWorkspaceHref, type WorkspaceState } from "../lib/url-state";
 import { LensSummary } from "./lens-summary";
 
-export function MonthOverview({ lens, state }: Readonly<{ lens: WorkspaceLens; state: WorkspaceState }>) {
-  const scope = [state.after && state.before && `${state.after} to ${state.before}`, state.account && `Account: ${state.account}`, state.currency && `Currency: ${state.currency}`].filter(Boolean).join(" · ");
+export function MonthOverview({ lens, state, scope }: Readonly<{ lens: WorkspaceLens; state: WorkspaceState; scope: string }>) {
   return (
     <section className="month-overview" aria-labelledby="monthly-question">
       <p className="eyebrow">Your private record</p>
-      <div className="overview-heading"><div><h1 id="monthly-question">What happened this month?</h1><p className="intro">Here is the exact trusted activity in your current scope.</p>{scope && <p className="scope-note">{scope}</p>}</div><a className="quiet-link" href={toWorkspaceHref(state, "compare")}>Compare these periods</a></div>
+      <div className="overview-heading"><div><h1 id="monthly-question">What happened this month?</h1><p className="intro">Here is the exact trusted activity in your current scope.</p><p className="scope-note">Scope: {scope}</p></div><a className="quiet-link" href={toWorkspaceHref(state, "compare")}>Compare these periods</a></div>
       <LensSummary flows={lens.lens} />
       {lens.trend.length > 0 && <ActivityTrend trend={lens.trend} />}
     </section>

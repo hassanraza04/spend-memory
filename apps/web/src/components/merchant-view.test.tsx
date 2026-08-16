@@ -31,9 +31,10 @@ describe("MerchantView", () => {
       confidence: 0.97,
     };
 
-    render(<MerchantView flows={scopeFlows} peoplePlaces={[place]} onShowActivity={vi.fn()} />);
+    render(<MerchantView scope="April 2026 · Direction: debit" flows={scopeFlows} peoplePlaces={[place]} onShowActivity={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Places and merchants" })).toBeTruthy();
+    expect(screen.getByText("Scope: April 2026 · Direction: debit")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "People and transfers" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Needs review" })).toBeNull();
     const card = screen.getByRole("article", { name: "Cafe North" });
@@ -52,7 +53,7 @@ describe("MerchantView", () => {
 
   it("shows a person group and applies its counterparty activity patch", () => {
     const onShowActivity = vi.fn();
-    render(<MerchantView flows={scopeFlows} peoplePlaces={[group({
+    render(<MerchantView scope="All local activity" flows={scopeFlows} peoplePlaces={[group({
       key: "counterparty:rina",
       label: "Rina",
       kind: "person",
@@ -84,7 +85,7 @@ describe("MerchantView", () => {
       }),
       descriptor: "PRIVATE STATEMENT DESCRIPTOR",
     };
-    render(<MerchantView flows={scopeFlows} peoplePlaces={[unresolved]} onShowActivity={onShowActivity} />);
+    render(<MerchantView scope="All local activity" flows={scopeFlows} peoplePlaces={[unresolved]} onShowActivity={onShowActivity} />);
 
     expect(screen.getByRole("heading", { name: "Needs review" })).toBeTruthy();
     const card = screen.getByRole("article", { name: "Unresolved statement label" });
@@ -96,18 +97,18 @@ describe("MerchantView", () => {
 
   it("applies the place search patch without exposing its label as a descriptor", () => {
     const onShowActivity = vi.fn();
-    render(<MerchantView flows={scopeFlows} peoplePlaces={[group({})]} onShowActivity={onShowActivity} />);
+    render(<MerchantView scope="All local activity" flows={scopeFlows} peoplePlaces={[group({})]} onShowActivity={onShowActivity} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     expect(onShowActivity).toHaveBeenCalledWith({ counterparty: undefined, offset: undefined, query: "Cafe North", selected: undefined, state: undefined });
   });
 
   it("uses scoped empty and direct local error messages", () => {
-    const { rerender } = render(<MerchantView flows={[]} peoplePlaces={[]} onShowActivity={vi.fn()} />);
+    const { rerender } = render(<MerchantView scope="All local activity" flows={[]} peoplePlaces={[]} onShowActivity={vi.fn()} />);
     expect(screen.getByText("There are no people or places in this period.")).toBeTruthy();
     expect(screen.queryByText("No trusted activity matches this scope yet.")).toBeNull();
 
-    rerender(<MerchantView flows={[]} peoplePlaces={[]} onShowActivity={vi.fn()} loadError="People and places could not be loaded from the local record." />);
+    rerender(<MerchantView scope="All local activity" flows={[]} peoplePlaces={[]} onShowActivity={vi.fn()} loadError="People and places could not be loaded from the local record." />);
     expect(screen.getByRole("status").textContent).toBe("People and places could not be loaded from the local record.");
     expect(screen.queryByText("There are no people or places in this period.")).toBeNull();
   });

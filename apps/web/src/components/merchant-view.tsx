@@ -47,11 +47,12 @@ function GroupCard({ group, onShowActivity }: Readonly<{ group: PeoplePlace; onS
   );
 }
 
-export function MerchantView({ flows, peoplePlaces, onShowActivity, loadError }: Readonly<{ flows: readonly CurrencyFlow[]; peoplePlaces: readonly PeoplePlace[]; onShowActivity: (patch: ActivityPatch) => void; loadError?: string }>) {
+export function MerchantView({ scope, flows, peoplePlaces, onShowActivity, loadError }: Readonly<{ scope: string; flows: readonly CurrencyFlow[]; peoplePlaces: readonly PeoplePlace[]; onShowActivity: (patch: ActivityPatch) => void; loadError?: string }>) {
   return (
     <section className="record-view" aria-labelledby="people-title">
       <p className="eyebrow">People and places</p>
       <h1 id="people-title">The names behind your activity</h1>
+      <p className="scope-note">Scope: {scope}</p>
       <p className="intro">People and places in this period, grouped from your trusted activity.</p>
       {flows.length > 0 && <LensSummary flows={flows} />}
       {loadError ? <p className="empty-note" role="status">{loadError}</p> : peoplePlaces.length ? sections.map((section) => {
