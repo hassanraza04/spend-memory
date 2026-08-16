@@ -25,7 +25,7 @@ Normal application logs must not include request bodies, document bytes, raw des
 
 ## Retention and deletion
 
-`DELETE /api/v1/local-data` requires the exact confirmation `DELETE LOCAL DATA`. It removes the configured statement data directory and local DuckDB database after path and writer-lock checks. `make clean-demo` removes the Docker demo volume.
+`DELETE /api/v1/local-data` requires the exact confirmation `DELETE LOCAL DATA`. It removes the configured statement data directory and local DuckDB database after path and writer-lock checks. `make clean-demo` runs `docker compose down --volumes --remove-orphans`, which removes the Docker data volume. Either action can remove real imports, so use it only when you mean to clear the whole local workspace.
 
 Deletion cannot remove copies a person made outside Spend Memory, including downloaded CSV exports, backups, screenshots, or manually copied logs.
 
