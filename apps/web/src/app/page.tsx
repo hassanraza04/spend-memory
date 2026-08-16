@@ -13,14 +13,18 @@ import { ComparisonView } from "../components/comparison-view";
 import { DataView } from "../components/data-view";
 import { SourcePanel } from "../components/source-panel";
 import { TransactionLedger } from "../components/transaction-ledger";
-import { ApiClient, ApiClientError, localErrorMessage, type Category, type MerchantEvidence, type Page as ApiPage, type PeriodExplanation, type RecurringCandidate, type ReviewCandidate, type Transaction, type WorkspaceContext, type WorkspaceLens } from "../lib/api";
+import { ApiClient, ApiClientError, localErrorMessage, type Page as ApiPage, type PeoplePlace, type PeriodExplanation, type RecurringCandidate, type ReviewCandidate, type Transaction, type WorkspaceContext, type WorkspaceLens } from "../lib/api";
 import { mergeWorkspaceState, toWorkspaceHref, workspaceStateFrom, workspaceViewFrom, type WorkspaceState } from "../lib/url-state";
 
 const api = new ApiClient();
 const demoWorkspaceKey = "spend-memory-demo-workspace";
 
 function apiScope(state: WorkspaceState): Record<string, string | undefined> {
-  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset };
+  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset, query: state.query };
+}
+
+function peoplePlacesScope(state: WorkspaceState): Record<string, string | undefined> {
+  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, query: state.query };
 }
 
 function comparisonScope(state: WorkspaceState, context?: WorkspaceContext): Record<string, string | undefined> {
@@ -48,11 +52,10 @@ export default function Page() {
   const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [groupIds, setGroupIds] = useState<string[]>([]);
-  const [merchants, setMerchants] = useState<MerchantEvidence[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [peoplePlaces, setPeoplePlaces] = useState<PeoplePlace[]>([]);
   const [recurring, setRecurring] = useState<RecurringCandidate[]>([]);
   const [review, setReview] = useState<ReviewCandidate[]>([]);
-  const [merchantError, setMerchantError] = useState<string>();
+  const [peoplePlacesError, setPeoplePlacesError] = useState<string>();
   const [recurringError, setRecurringError] = useState<string>();
   const [reviewError, setReviewError] = useState<string>();
   const [comparisonError, setComparisonError] = useState<{ key: string; message: string; missingPrevious: boolean }>();
@@ -103,7 +106,7 @@ export default function Page() {
   useEffect(() => {
     if (!hasWorkspace) return;
     let current = true;
-    if (view === "people-places") void Promise.all([api.listMerchants(), api.listCategories()]).then(([nextMerchants, nextCategories]) => { if (current) { setMerchants(nextMerchants.items); setCategories(nextCategories.items); setMerchantError(undefined); } }).catch((error) => { if (current) setMerchantError(localErrorMessage(error, "Merchant and category data could not be loaded.")); });
+    if (view === "people-places") void api.listPeoplePlaces(peoplePlacesScope(state)).then((nextPeoplePlaces) => { if (current) { setPeoplePlaces(nextPeoplePlaces.items); setPeoplePlacesError(undefined); } }).catch((error) => { if (current) setPeoplePlacesError(localErrorMessage(error, "People and places could not be loaded from the local record.")); });
     if (view === "patterns") {
       void api.listRecurring().then((nextRecurring) => { if (current) { setRecurring(nextRecurring.items); setRecurringError(undefined); } }).catch((error) => { if (current) setRecurringError(localErrorMessage(error, "Recurring data could not be loaded.")); });
       void api.listReview().then((nextReview) => { if (current) { setReview(nextReview.items); setReviewError(undefined); } }).catch((error) => { if (current) setReviewError(localErrorMessage(error, "Review data could not be loaded.")); });
@@ -116,10 +119,10 @@ export default function Page() {
     return () => { current = false; };
   }, [activityRevision, hasWorkspace, state, view, workspaceContext]);
 
-  function changeScope(patch: Partial<WorkspaceState>) {
+  function changeScope(patch: Partial<WorkspaceState>, nextView = view) {
     const next = mergeWorkspaceState(state, patch);
     if ((state.after || state.before) && !next.after && !next.before) shouldDefaultScope.current = false;
-    window.history.pushState({}, "", toWorkspaceHref(next, view));
+    window.history.pushState({}, "", toWorkspaceHref(next, nextView));
     setSelected(null);
     setState(next);
   }
@@ -160,11 +163,11 @@ export default function Page() {
       {view === "data" && hasWorkspace !== false ? <DataView scope={apiScope(state)} onDeleted={leaveDemoWorkspace} /> : view === "compare" && hasWorkspace === false ? comparisonView : !hasRecord ? <FirstRun ready={hasWorkspace !== null} onReady={refreshWorkspaceContext} /> : <>
         {view === "this-month" && <MonthOverview lens={lens} state={state} />}
         {view === "all-activity" && <section className="view-intro"><p className="eyebrow">Your private record</p><h1>All activity</h1><p className="intro">Search a person, account, place, or anything else you remember.</p></section>}
-        {view === "people-places" && <MerchantView flows={lens.lens} merchants={merchants} categories={categories} counterpartyLabel={state.counterparty} loadError={merchantError} />}
+        {view === "people-places" && <MerchantView flows={lens.lens} peoplePlaces={peoplePlaces} onShowActivity={(patch) => changeScope(patch, "all-activity")} loadError={peoplePlacesError} />}
         {view === "patterns" && <><RecurringView flows={lens.lens} recurring={recurring} loadError={recurringError} /><ReviewView flows={lens.lens} review={review} loadError={reviewError} /></>}
         {view === "compare" && comparisonView}
         {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} lens={lens} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
-        {activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
+        {(view === "this-month" || view === "all-activity") && activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
         {groupIds.length > 0 && <CounterpartyEditor transactionIds={groupIds} descriptor={groupIds.length === 1 ? activeSelected?.description ?? "" : ""} onSaved={() => setActivityRevision((value) => value + 1)} />}
       </>}
     </AppShell>

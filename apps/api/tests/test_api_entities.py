@@ -126,8 +126,8 @@ def _row(
 class _GroupedEntities(_Entities):
     def list_search_rows(self) -> list[SearchRow]:
         return [
-            _row(10, date(2026, 1, 1), "METROMART ONE", 700, merchant_name="MetroMart", state="confirmed"),
-            _row(12, date(2026, 1, 15), "METROMART TWO", 500, merchant_name="MetroMart", state="confirmed"),
+            _row(10, date(2026, 1, 1), "METROMART ONE", 700, merchant_name="MetroMart", state="confirmed", category_id=UUID(int=2), category_label="Groceries"),
+            _row(12, date(2026, 1, 15), "METROMART TWO", 500, merchant_name="MetroMart", state="confirmed", category_id=UUID(int=2), category_label="Groceries"),
             _row(13, date(2026, 1, 20), "BANK TRANSFER 91", 300),
             _row(14, date(2026, 1, 21), "BANK TRANSFER 91", 400),
             _row(15, date(2026, 2, 1), "METROMART FEB", 900, merchant_name="MetroMart", state="confirmed"),
@@ -312,6 +312,26 @@ def test_people_places_only_calls_an_assigned_counterparty_a_person(tmp_path: Pa
     assert response.json()["items"][0]["key"] == (
         "counterparty:00000000-0000-0000-0000-00000000001e"
     )
+
+
+def test_people_places_honours_every_activity_filter(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GroupedEntities())
+
+    amount = client.get(
+        "/api/v1/people-places?amount_min_minor=600&amount_max_minor=800"
+    ).json()["items"]
+    merchant = client.get("/api/v1/people-places?merchant=MetroMart").json()["items"]
+    category = client.get("/api/v1/people-places?category=Groceries").json()["items"]
+    state = client.get("/api/v1/people-places?state=unresolved").json()["items"]
+    counterparty = _client(tmp_path, _PeopleEntities()).get(
+        "/api/v1/people-places?counterparty=Rina"
+    ).json()["items"]
+
+    assert [(item["kind"], item["transactionCount"]) for item in amount] == [("place", 1)]
+    assert [(item["kind"], item["transactionCount"]) for item in merchant] == [("place", 3)]
+    assert [(item["kind"], item["transactionCount"]) for item in category] == [("place", 2)]
+    assert [(item["kind"], item["transactionCount"]) for item in state] == [("unresolved", 2)]
+    assert [(item["kind"], item["transactionCount"]) for item in counterparty] == [("person", 1)]
 
 
 def test_categories_and_candidates_use_the_same_complete_scoped_evidence(

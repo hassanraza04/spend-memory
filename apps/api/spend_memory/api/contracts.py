@@ -81,12 +81,24 @@ class EntityQuery(PageRequest):
     account: str | None = None
     currency: str | None = Field(default=None, min_length=1, max_length=12)
     direction: Direction | None = None
+    amount_min_minor: int | None = Field(default=None, ge=0)
+    amount_max_minor: int | None = Field(default=None, ge=0)
+    merchant: str | None = None
+    category: str | None = None
+    counterparty: str | None = None
+    state: str | None = None
     query: str | None = None
 
     @model_validator(mode="after")
     def validate_date_range(self) -> "EntityQuery":
         if self.after is not None and self.before is not None and self.after >= self.before:
             raise ValueError("after_must_precede_before")
+        if (
+            self.amount_min_minor is not None
+            and self.amount_max_minor is not None
+            and self.amount_min_minor > self.amount_max_minor
+        ):
+            raise ValueError("amount_min_must_not_exceed_max")
         return self
 
 

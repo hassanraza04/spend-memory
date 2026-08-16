@@ -1,32 +1,68 @@
 "use client";
+/* eslint-disable no-unused-vars -- the base ESLint preset does not understand TypeScript callback parameter names. */
 
-import { useState } from "react";
-
-import { ApiClient, localErrorMessage, type Category, type CurrencyFlow, type MerchantEvidence } from "../lib/api";
+import type { CurrencyFlow, PeoplePlace } from "../lib/api";
 import { formatMoney } from "../lib/format";
 import { LensSummary } from "./lens-summary";
-import { EvidenceList, RecordChart } from "./chart";
 
-const api = new ApiClient();
+type ActivityPatch = { counterparty?: string; offset?: string; query?: string; selected?: string; state?: string };
 
-function MerchantCard({ merchant }: Readonly<{ merchant: MerchantEvidence }>) {
-  const [descriptor, setDescriptor] = useState("");
-  const [state, setState] = useState<"ready" | "invalid" | "saving" | "saved" | "failed">("ready");
-  const [failure, setFailure] = useState("");
-  const canCorrect = Boolean(merchant.merchant_id);
-  async function save() {
-    if (!descriptor.trim() || descriptor.length > 500) { setState("invalid"); return; }
-    if (!merchant.merchant_id) return;
-    setState("saving");
-    try { await api.correctMerchant(merchant.merchant_id, descriptor.trim()); setState("saved"); } catch (error) { setFailure(localErrorMessage(error, "The exact label was not saved.")); setState("failed"); }
-  }
-  const status = merchant.status === "confirmed" ? "Confirmed" : merchant.status === "suggested" ? "Suggested" : "Unresolved";
-  const normalizedDescriptor = String(merchant.evidence.normalized_descriptor ?? "");
-  return <article className="candidate-card" aria-label={`Merchant evidence: ${merchant.method} for ${normalizedDescriptor}`} data-testid={`merchant-card-${merchant.transaction_id}`} data-resolution-method={merchant.method} data-normalized-descriptor={normalizedDescriptor}><div className="candidate-heading"><div><h3>{merchant.merchant_name ?? "Unresolved statement label"}</h3><p><span className={`status-badge ${merchant.status}`}>{status}</span> {Math.round(merchant.confidence * 100)}% confidence</p></div></div><EvidenceList values={merchant.evidence} />{canCorrect && <div className="inline-correction"><label>Exact statement label for {merchant.merchant_name}<input aria-label={`Exact statement label for ${merchant.merchant_name}`} maxLength={500} value={descriptor} onChange={(event) => { setDescriptor(event.target.value); setState("ready"); }} /></label><button className="button secondary" type="button" disabled={state === "saving"} onClick={() => void save()}>Save correction for {merchant.merchant_name}</button>{state === "invalid" && <p role="status">{descriptor.length > 500 ? "Use 500 characters or fewer." : "Enter the exact statement label before saving."}</p>}{state === "saved" && <p role="status">Saved.</p>}{state === "failed" && <p role="status">{failure}</p>}</div>}</article>;
+const sections = [
+  { kind: "person", title: "People and transfers" },
+  { kind: "place", title: "Places and merchants" },
+  { kind: "unresolved", title: "Needs review" },
+] as const;
+
+function activityPatch(group: PeoplePlace): ActivityPatch {
+  if (group.kind === "person") return { counterparty: group.label, offset: undefined, query: undefined, selected: undefined, state: undefined };
+  if (group.kind === "place") return { counterparty: undefined, offset: undefined, query: group.label, selected: undefined, state: undefined };
+  return { counterparty: undefined, offset: undefined, query: undefined, selected: undefined, state: "unresolved" };
 }
 
-export function MerchantView({ flows, merchants, categories, counterpartyLabel, loadError }: Readonly<{ flows: readonly CurrencyFlow[]; merchants: readonly MerchantEvidence[]; categories: readonly Category[]; counterpartyLabel?: string; loadError?: string }>) {
-  return <section className="record-view" aria-labelledby="people-title"><p className="eyebrow">People and places</p><h1 id="people-title">The names behind your activity</h1><p className="intro">Confirmed labels stay distinct from suggestions until you choose to correct them.</p>{counterpartyLabel && <p className="scope-note">Current person or account: {counterpartyLabel}</p>}<p className="scope-note">Current selected-scope flow</p><LensSummary flows={flows} /><p className="scope-note">Whole-record merchant and category evidence</p><RecordChart title="Whole-record category totals" values={categories.flatMap((category) => category.lens.map((flow) => ({ label: `${category.label} (${flow.currency})`, value: formatMoney(flow.sent_minor, flow.currency) })))} />
-    <div className="candidate-grid">{loadError ? <p className="empty-note" role="status">{loadError}</p> : merchants.length ? merchants.map((merchant) => <MerchantCard key={merchant.transaction_id} merchant={merchant} />) : <p className="empty-note">No whole-record merchant evidence is available yet.</p>}</div>
-  </section>;
+function GroupCard({ group, onShowActivity }: Readonly<{ group: PeoplePlace; onShowActivity: (patch: ActivityPatch) => void }>) {
+  const needsReview = group.status === "unresolved";
+  return (
+    <article className="candidate-card people-place-card" aria-label={group.label}>
+      <div className="candidate-heading">
+        <div>
+          <h3>{group.label}</h3>
+          <span className={`status-badge ${needsReview ? "unresolved" : "confirmed"}`}>{needsReview ? "Needs review" : "Confirmed"}</span>
+        </div>
+      </div>
+      <p className="group-meta">{group.transactionCount} {group.transactionCount === 1 ? "transaction" : "transactions"} · Last activity {group.lastActivityDate}</p>
+      <div className="group-flows">
+        {group.flows.map((flow) => (
+          <dl key={flow.currency} className="currency-flow" aria-label={`${group.label} ${flow.currency} flow`}>
+            <dt>{flow.currency}</dt>
+            <dd><span>Sent</span>{formatMoney(flow.sent_minor, flow.currency)}</dd>
+            <dd><span>Received</span>{formatMoney(flow.received_minor, flow.currency)}</dd>
+            <dd><span>Net flow</span>{formatMoney(flow.net_minor, flow.currency)}</dd>
+          </dl>
+        ))}
+      </div>
+      <button className="button secondary" type="button" onClick={() => onShowActivity(activityPatch(group))}>
+        {needsReview ? "Review in activity" : "Show activity"}
+      </button>
+    </article>
+  );
+}
+
+export function MerchantView({ flows, peoplePlaces, onShowActivity, loadError }: Readonly<{ flows: readonly CurrencyFlow[]; peoplePlaces: readonly PeoplePlace[]; onShowActivity: (patch: ActivityPatch) => void; loadError?: string }>) {
+  return (
+    <section className="record-view" aria-labelledby="people-title">
+      <p className="eyebrow">People and places</p>
+      <h1 id="people-title">The names behind your activity</h1>
+      <p className="intro">People and places in this period, grouped from your trusted activity.</p>
+      {flows.length > 0 && <LensSummary flows={flows} />}
+      {loadError ? <p className="empty-note" role="status">{loadError}</p> : peoplePlaces.length ? sections.map((section) => {
+        const groups = peoplePlaces.filter((group) => group.kind === section.kind);
+        return groups.length ? (
+          <section className="group-section" aria-labelledby={`group-${section.kind}`} key={section.kind}>
+            <h2 id={`group-${section.kind}`}>{section.title}</h2>
+            <div className="candidate-grid">{groups.map((group) => <GroupCard key={group.key} group={group} onShowActivity={onShowActivity} />)}</div>
+          </section>
+        ) : null;
+      }) : <p className="empty-note">There are no people or places in this period.</p>}
+    </section>
+  );
 }

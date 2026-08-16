@@ -291,6 +291,59 @@ describe("home page", () => {
     expect(await screen.findByText("Expected next: 2026-09-01 to 2026-09-03")).toBeTruthy();
   });
 
+  it("loads people and places with the exact current API scope", async () => {
+    window.history.replaceState({}, "", "/?view=people-places&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&q=Coffee&merchant=MetroMart&category=Groceries&counterparty=Rina&state=unresolved&direction=debit&amount_min_minor=500&amount_max_minor=30000&sort=amount&order=desc&limit=25&offset=50&selected=00000000-0000-0000-0000-000000000099");
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      const path = String(url);
+      requests.push(path);
+      return Promise.resolve(new Response(JSON.stringify(
+        path.includes("/lens")
+          ? { lens: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 1 }], trend: [] }
+          : path.includes("/search")
+            ? { query: "MetroMart", items: [], lens: [{ currency: "AED", sent_minor: 25000, received_minor: 0, net_minor: -25000, transaction_count: 2 }] }
+          : path.includes("/people-places")
+            ? { items: [{ key: "merchant:metro", label: "MetroMart", kind: "place", status: "confirmed", transactionCount: 2, lastActivityDate: "2026-04-12", flows: [{ currency: "AED", sent_minor: 25000, received_minor: 0, net_minor: -25000, transaction_count: 2 }], recentTransactionIds: ["t2", "t1"] }], total: 1, limit: 50, offset: 0 }
+            : path.includes("/transactions")
+              ? { items: [], total: path.includes("limit=1") ? 1 : 0, limit: path.includes("limit=1") ? 1 : 50, offset: 0 }
+            : { items: [{}], total: 1, limit: 1, offset: 0 },
+      ), { status: 200 }));
+    }));
+
+    render(<Page />);
+
+    expect(await screen.findByRole("heading", { name: "Places and merchants" })).toBeTruthy();
+    expect(requests).toContain("/api/v1/people-places?after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&direction=debit&amount_min_minor=500&amount_max_minor=30000&merchant=MetroMart&category=Groceries&counterparty=Rina&state=unresolved&query=Coffee");
+    expect(requests.filter((path) => path.includes("/people-places"))).not.toEqual(expect.arrayContaining([expect.stringMatching(/[?&](sort|order|limit|offset)=/)]));
+    expect(requests.some((path) => path.includes("/merchants"))).toBe(false);
+    expect(requests.some((path) => path.includes("/categories"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
+    expect(await screen.findByRole("heading", { name: "All activity" })).toBeTruthy();
+    expect(window.location.search).toBe("?view=all-activity&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&q=MetroMart&merchant=MetroMart&category=Groceries&direction=debit&amount_min_minor=500&amount_max_minor=30000&sort=amount&order=desc&limit=25");
+  });
+
+  it("never opens selected source evidence in people and places", async () => {
+    window.history.replaceState({}, "", "/?view=people-places&after=2026-04-01&before=2026-05-01&selected=00000000-0000-0000-0000-000000000099");
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000099", transaction_date: "2026-04-12", account: "Daily", description: "PRIVATE RESOLUTION LABEL", currency: "AED", amount_minor: 1200, direction: "debit", merchant: "MetroMart", category: "Groceries", counterparty: null, state: "confirmed_alias", source: { document: "private.csv", ordinal: 1, page: null, row: 2, text: "RAW PRIVATE SOURCE", extraction_confidence: 0.97 },
+    };
+    vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
+      String(url).includes("/lens")
+        ? { lens: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 1 }], trend: [] }
+        : String(url).includes("/people-places")
+          ? { items: [], total: 0, limit: 50, offset: 0 }
+          : { items: [transaction], total: 1, limit: 50, offset: 0 },
+    ), { status: 200 }))));
+
+    render(<Page />);
+
+    expect(await screen.findByRole("heading", { name: "The names behind your activity" })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Source evidence" })).toBeNull();
+    expect(screen.queryByText("RAW PRIVATE SOURCE")).toBeNull();
+    expect(screen.queryByText("Extraction confidence")).toBeNull();
+    expect(screen.queryByText("Resolution")).toBeNull();
+  });
+
   it("keeps local data controls available while the record refreshes", () => {
     window.history.replaceState({}, "", "/?view=data");
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
