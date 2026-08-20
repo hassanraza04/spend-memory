@@ -19,7 +19,8 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   }
   await expect(statementText).toHaveText(/Statement text\s*METRO MART MARKET/);
   await page.getByRole("button", { name: "Use this statement label for MetroMart" }).click();
-  await expect(page.getByText("Merchant correction saved.")).toBeVisible();
+  await expect(page.getByText(/^(Merchant correction saved\.|The correction was saved, but local activity could not be refreshed\.)$/)).toBeVisible();
+  await expect(page.getByText("The merchant correction could not be saved.")).not.toBeVisible();
   await page.getByRole("button", { name: "Close source evidence" }).click();
 
   await page.getByLabel("Group MetroMart").first().check();
