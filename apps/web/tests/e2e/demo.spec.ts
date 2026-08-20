@@ -18,9 +18,11 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
     if ((await statementText.textContent()) === "Statement textMETRO MART MARKET") break;
   }
   await expect(statementText).toHaveText(/Statement text\s*METRO MART MARKET/);
+  const correction = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname.startsWith("/api/v1/merchants/"));
   await page.getByRole("button", { name: "Use this statement label for MetroMart" }).click();
-  await expect(page.getByText(/^(Merchant correction saved\.|The correction was saved, but local activity could not be refreshed\.)$/)).toBeVisible();
-  await expect(page.getByText("The merchant correction could not be saved.")).not.toBeVisible();
+  const correctionResponse = await correction;
+  expect(correctionResponse.ok(), await correctionResponse.text()).toBe(true);
+  await expect(page.getByText("Merchant correction saved.")).toBeVisible();
   await page.getByRole("button", { name: "Close source evidence" }).click();
 
   await page.getByLabel("Group MetroMart").first().check();
