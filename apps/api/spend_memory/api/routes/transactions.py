@@ -50,7 +50,7 @@ def serialize_transaction(row: SearchRow) -> TransactionResponse:
     )
 
 
-def query_from(filters: TransactionFilters, text: str = "") -> SearchQuery:
+def query_from(filters: TransactionFilters, text: str | None = None) -> SearchQuery:
     return SearchQuery(
         after=filters.after,
         before=filters.before,
@@ -63,7 +63,7 @@ def query_from(filters: TransactionFilters, text: str = "") -> SearchQuery:
         amount_min_minor=filters.amount_min_minor,
         amount_max_minor=filters.amount_max_minor,
         state=filters.state,
-        text=text,
+        text=(filters.query or "").strip() if text is None else text,
     )
 
 

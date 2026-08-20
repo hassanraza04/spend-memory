@@ -5,12 +5,14 @@ import { RecurringView } from "./recurring-view";
 
 describe("RecurringView", () => {
   it("shows scoped recurring evidence when candidates exist", () => {
-    render(<RecurringView scope="2026-08-01 to 2026-09-01" recurring={[{ candidate_id: "r1", label: "Music", cadence: "monthly", status: "suggested", confidence: 0.88, evidence: { amount_minor: 999 }, transaction_ids: ["t1"], expected_next_start: "2026-09-02", expected_next_end: "2026-09-05" }]} />);
+    render(<RecurringView scope="2026-08-01 to 2026-09-01" recurring={[{ candidate_id: "r1", label: "Streambox", cadence: "monthly", status: "suggested", confidence: 0.88, evidence: { amount_minor: 999 }, transaction_ids: ["t1"], expected_next_start: "2026-09-02", expected_next_end: "2026-09-05" }]} />);
 
     expect(screen.getByText("Scope: 2026-08-01 to 2026-09-01")).toBeTruthy();
     expect(screen.getByText("Recurring candidates in this scope are based on your trusted local activity.")).toBeTruthy();
     expect(screen.getByText("Expected next: 2026-09-02 to 2026-09-05")).toBeTruthy();
     expect(screen.getByText("Suggested pattern")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Streambox" })).toBeTruthy();
+    expect(screen.queryByText("streambox monthly")).toBeNull();
     expect(screen.getByText("amount_minor: 999")).toBeTruthy();
     expect(screen.queryByLabelText("Whole-record recurring candidate evidence")).toBeNull();
   });

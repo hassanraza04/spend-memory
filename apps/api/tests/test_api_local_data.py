@@ -132,7 +132,7 @@ def test_demo_reset_builds_meaningful_enrichment_evidence(tmp_path: Path) -> Non
         - min(item["amount_minor"] for item in streambox)
     ) * 100
     assert len(recurring) == 1
-    assert recurring[0]["label"] == "streambox monthly"
+    assert recurring[0]["label"] == "Streambox"
     assert recurring[0]["cadence"] == "monthly"
     assert recurring[0]["evidence"]["observation_count"] == 4
     assert len(recurring[0]["transaction_ids"]) == 4

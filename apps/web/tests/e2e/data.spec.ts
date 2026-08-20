@@ -23,7 +23,7 @@ test("exports the active trusted scope and requires exact local deletion confirm
   expect(path).not.toBeNull();
   const csv = await readFile(path!, "utf8");
   const rows = csv.trimEnd().split(/\r?\n/);
-  expect(rows).toHaveLength(18);
+  expect(rows).toHaveLength(2);
   expect(rows[0]).toContain("transaction_id,transaction_date,account,description");
   expect(csv).toContain("MetroMart POS");
   expect(csv).not.toContain("BREW-LAB");

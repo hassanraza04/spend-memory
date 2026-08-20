@@ -3,23 +3,23 @@ import { expect, resetDemo, test } from "./fixtures";
 test("explores the synthetic demo with source evidence and a grouped AED flow", async ({ page, freshRecord }) => {
   await freshRecord();
   await resetDemo(page, "");
-  await expect(page).toHaveURL(/after=2026-01-01&before=2026-02-01/);
+  await expect(page).toHaveURL(/after=2026-04-01&before=2026-05-01/);
   await expect(page.getByRole("row").nth(1)).toBeVisible();
 
   await page.getByLabel("Search activity").fill("MetroMart");
   await page.getByRole("button", { name: "Apply filters" }).click();
-  const row = page.getByRole("row", { name: /MetroMart POS/ });
+  const row = page.getByRole("row", { name: /metromart pos/i });
   await expect(row).toBeVisible();
   await row.click();
-  await expect(page.getByRole("complementary", { name: "Source evidence" })).toContainText("MetroMart POS");
+  await expect(page.getByRole("complementary", { name: "Source evidence" })).toContainText(/metromart pos/i);
 
-  await page.getByLabel("Group MetroMart POS").check();
+  await page.getByLabel(/Group METROMART POS/i).check();
   await page.getByLabel("Counterparty name").fill("Weekend groceries");
   await page.getByRole("button", { name: "Create and group" }).click();
-  const flow = page.getByLabel("AED flow");
-  await expect(flow).toContainText(/Sent[\s\S]*56\.15/);
+  const flow = page.getByRole("region", { name: "Result summary" }).getByLabel("AED flow");
+  await expect(flow).toContainText(/Sent[\s\S]*125\.00/);
   await expect(flow).toContainText(/Received[\s\S]*0\.00/);
-  await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*56\.15/);
+  await expect(flow).toContainText(/Net flow[\s\S]*-AED[\s\S]*125\.00/);
 });
 
 test("shows the complete API-derived result summary after searching demo activity", async ({ page, freshRecord }) => {

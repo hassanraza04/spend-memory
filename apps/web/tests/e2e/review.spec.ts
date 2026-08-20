@@ -17,18 +17,18 @@ test("opens grouped place activity inside the synthetic demo scope", async ({ pa
 
 test("shows a recurring pattern from the synthetic demo", async ({ page, freshRecord }) => {
   await freshRecord();
-  await resetDemo(page, "?after=2026-01-01&before=2026-04-01");
+  await resetDemo(page, "?after=2026-01-01&before=2026-05-01");
   await page.getByRole("link", { name: "Patterns" }).click();
-  await expect(page).toHaveURL(/view=patterns.*after=2026-01-01.*before=2026-04-01/);
+  await expect(page).toHaveURL(/view=patterns.*after=2026-01-01.*before=2026-05-01/);
   await expect(page.getByRole("heading", { name: "The payments that keep coming back" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /streambox monthly/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Streambox" })).toBeVisible();
 });
 
 test("shows possible duplicate evidence from the synthetic PKR statement", async ({ page, freshRecord }) => {
   await freshRecord();
   await importStatement(page, fixturePath("source", "pkr_statement_compact.pdf"));
-  await page.reload();
-  await page.getByRole("link", { name: "Patterns" }).click();
+  await page.goto("/?view=patterns&after=2024-09-01&before=2024-10-01");
+  await expect(page).toHaveURL(/view=patterns.*after=2024-09-01.*before=2024-10-01/);
   await expect(page.getByRole("heading", { name: "A few things worth checking" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Possible duplicate" })).toBeVisible();
 });

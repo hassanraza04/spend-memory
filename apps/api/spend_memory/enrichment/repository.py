@@ -912,13 +912,16 @@ class EnrichmentRepository:
             with duckdb.connect(str(self.database_path)) as connection:
                 candidates = connection.execute(
                     """
-                    SELECT candidates.recurring_candidate_id, candidates.normalized_descriptor,
+                    SELECT candidates.recurring_candidate_id,
+                        coalesce(merchants.merchant_name, 'Unresolved statement label'),
                         candidates.cadence, candidates.status, candidates.confidence,
                         candidates.evidence_json, candidates.expected_next_start,
                         candidates.expected_next_end
                     FROM recurring_candidates AS candidates
                     JOIN recurring_candidate_state AS state
                         ON state.active_generation_id = candidates.generation_id
+                    LEFT JOIN merchants
+                        ON merchants.merchant_id = candidates.merchant_id
                     ORDER BY candidates.first_transaction_date, candidates.recurring_candidate_id
                     """
                 ).fetchall()

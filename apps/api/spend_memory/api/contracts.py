@@ -146,6 +146,7 @@ class TransactionFilters(TransactionQuery):
     category: str | None = None
     counterparty: str | None = None
     state: str | None = None
+    query: str | None = None
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "TransactionFilters":
