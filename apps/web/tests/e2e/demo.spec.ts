@@ -6,15 +6,18 @@ test("explores the synthetic demo with source evidence and a grouped AED flow", 
   await expect(page).toHaveURL(/after=2026-04-01&before=2026-05-01/);
   await expect(page.getByRole("row").nth(1)).toBeVisible();
 
-  await page.getByLabel("Search activity").fill("METROMART POS");
+  await page.getByLabel("Search activity").fill("METRO MART MARKET");
   await page.getByRole("button", { name: "Apply filters" }).click();
-  const row = page.getByRole("row", { name: /MetroMart/ }).first();
-  await expect(row).toBeVisible();
-  await expect(row).not.toContainText("METROMART POS");
-  await row.click();
+  const rows = page.getByRole("row", { name: /MetroMart/ });
+  await expect(rows.first()).toBeVisible();
+  await expect(rows.first()).not.toContainText("METRO MART MARKET");
   const sourcePanel = page.getByRole("complementary", { name: "Source evidence" });
   const statementText = sourcePanel.getByText("Statement text", { exact: true }).locator("..");
-  await expect(statementText).toHaveText(/Statement text\s*METROMART POS/);
+  for (let index = 0; index < await rows.count(); index += 1) {
+    await rows.nth(index).click();
+    if ((await statementText.textContent()) === "Statement textMETRO MART MARKET") break;
+  }
+  await expect(statementText).toHaveText(/Statement text\s*METRO MART MARKET/);
   await page.getByRole("button", { name: "Use this statement label for MetroMart" }).click();
   await expect(page.getByText("Merchant correction saved.")).toBeVisible();
   await page.getByRole("button", { name: "Close source evidence" }).click();
