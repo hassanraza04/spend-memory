@@ -38,7 +38,7 @@ describe("TransactionLedger", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(onScopeChange).toHaveBeenCalledWith(expect.objectContaining({ query: "Rina", account: "Daily" }));
 
-    const row = screen.getByRole("row", { name: /Rina lunch/i });
+    const row = screen.getByRole("row", { name: /Cafe North/i });
     row.focus();
     fireEvent.keyDown(row, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledWith(rows[0]);
@@ -58,7 +58,7 @@ describe("TransactionLedger", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Group Rina lunch" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Group Cafe North" }));
     expect(onToggleGrouping).toHaveBeenCalledWith(rows[0].transaction_id);
   });
 
@@ -66,7 +66,7 @@ describe("TransactionLedger", () => {
     const onSelect = vi.fn();
     render(<TransactionLedger page={{ items: rows, total: 1, limit: 50, offset: 0 }} lens={emptyLens} state={{}} onScopeChange={vi.fn()} onSelect={onSelect} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
 
-    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Group Rina lunch" }), { key: " " });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Group Cafe North" }), { key: " " });
     expect(onSelect).not.toHaveBeenCalled();
   });
 
@@ -102,11 +102,31 @@ describe("TransactionLedger", () => {
   });
 
   it("keeps API lens totals when the visible search page is empty", () => {
-    render(<TransactionLedger page={{ items: [], total: 0, limit: 1, offset: 1 }} lens={{ lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }], trend: [] }} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} />);
+    render(<TransactionLedger page={{ items: [], total: 2, limit: 1, offset: 2 }} lens={{ lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }], trend: [] }} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} />);
 
     const summary = screen.getByRole("region", { name: "Result summary" });
     expect(summary.textContent).toContain("AED 12.34");
     expect(summary.textContent).toContain("Entries2");
     expect(summary.textContent).not.toContain("0 matching entries");
+    expect(screen.getByText("2 trusted entries")).toBeTruthy();
+  });
+
+  it("shows one resolved display label without repeating the raw descriptor", () => {
+    render(<TransactionLedger page={{ items: rows, total: 1, limit: 50, offset: 0 }} lens={emptyLens} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
+
+    const row = screen.getByRole("row", { name: /Cafe North/ });
+    expect(row.textContent).toContain("Cafe North");
+    expect(row.textContent).not.toContain("Rina lunch");
+    expect(screen.getByRole("checkbox", { name: "Group Cafe North" })).toBeTruthy();
+  });
+
+  it("never uses a raw descriptor as an unresolved ledger label", () => {
+    const unresolved = { ...rows[0], description: "PRIVATE STATEMENT REFERENCE 8841", merchant: null, counterparty: null, state: "unresolved" };
+    render(<TransactionLedger page={{ items: [unresolved], total: 1, limit: 50, offset: 0 }} lens={emptyLens} state={{}} onScopeChange={vi.fn()} onSelect={vi.fn()} selectedForGrouping={[]} onToggleGrouping={vi.fn()} />);
+
+    const row = screen.getByRole("row", { name: /Unresolved statement entry/ });
+    expect(row.textContent).not.toContain("PRIVATE STATEMENT REFERENCE 8841");
+    expect(screen.queryByText("PRIVATE STATEMENT REFERENCE 8841")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Group Unresolved statement entry" })).toBeTruthy();
   });
 });

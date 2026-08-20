@@ -47,4 +47,7 @@ def search_transactions_route(
         query=query,
         items=[serialize_transaction(row) for row in page],
         lens=tuple(CurrencyFlowResponse(**flow.__dict__) for flow in lens),
+        limit=filters.limit,
+        offset=filters.offset,
+        total=len(scoped),
     )

@@ -39,6 +39,9 @@ def test_search_returns_structured_account_scope_and_pre_paging_aed_lens(tmp_pat
     assert response.status_code == 200
     assert response.json()["query"] == "Rina"
     assert len(response.json()["items"]) == 1
+    assert response.json()["total"] == 2
+    assert response.json()["limit"] == 1
+    assert response.json()["offset"] == 0
     assert response.json()["lens"] == [
         {
             "currency": "AED",
@@ -48,6 +51,19 @@ def test_search_returns_structured_account_scope_and_pre_paging_aed_lens(tmp_pat
             "transaction_count": 2,
         }
     ]
+
+
+def test_search_keeps_server_pagination_on_an_empty_later_page(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _Rows
+
+    response = TestClient(app).get("/api/v1/search?query=Rina&limit=1&offset=2")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    assert response.json()["total"] == 2
+    assert response.json()["limit"] == 1
+    assert response.json()["offset"] == 2
 
 
 def test_search_allows_a_filter_only_counterparty_lens(tmp_path: Path) -> None:

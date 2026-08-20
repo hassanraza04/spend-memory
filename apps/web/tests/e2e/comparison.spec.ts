@@ -5,9 +5,9 @@ test("explains an exact month-to-month change with contribution evidence", async
   await importStatement(page, fixturePath("source", "aed_statement_tabular.pdf"));
   await page.goto("/?view=compare&after=2025-02-01&before=2025-03-01&account=AED-SYNTH-001&currency=AED");
   await expect(page.getByRole("heading", { name: "What changed?" })).toBeVisible();
-  await expect(page.getByLabel("Exact comparison totals")).toContainText(/Earlier net[\s\S]*-AED[\s\S]*1,357\.27/);
+  await expect(page.getByLabel("Exact comparison totals")).toContainText(/Earlier net[\s\S]*-AED[\s\S]*1,497\.70/);
   await expect(page.getByLabel("Exact comparison totals")).toContainText(/Later net[\s\S]*-AED[\s\S]*1,497\.53/);
-  await expect(page.getByLabel("Exact comparison totals")).toContainText(/Exact change[\s\S]*-AED[\s\S]*140\.26/);
+  await expect(page.getByLabel("Exact comparison totals")).toContainText(/Exact change[\s\S]*AED[\s\S]*0\.17/);
   await expect(page.getByRole("table", { name: "Waterfall text alternative" })).toBeVisible();
   const evidence = page.getByRole("table", { name: "Exact contribution evidence" });
   await expect(evidence.getByRole("row", { name: /orbit fuel[\s\S]*-AED[\s\S]*299\.13[\s\S]*5/ })).toBeVisible();

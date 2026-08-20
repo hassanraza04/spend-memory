@@ -108,6 +108,7 @@ class SearchQuery:
     amount_min_minor: int | None = None
     amount_max_minor: int | None = None
     state: str | None = None
+    unresolved_group: UUID | None = None
     text: str = ""
 
 

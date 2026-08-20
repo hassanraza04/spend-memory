@@ -68,7 +68,7 @@ describe("MerchantView", () => {
     expect(card.textContent).toContain("$10.00");
     expect(card.textContent).toContain("-$32.00");
     fireEvent.click(within(card).getByRole("button", { name: "Show activity" }));
-    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: "Rina", offset: undefined, query: undefined, selected: undefined, state: undefined });
+    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: "Rina", merchant: undefined, offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: undefined });
   });
 
   it("keeps unresolved descriptors private and applies only the review-state patch", () => {
@@ -92,15 +92,15 @@ describe("MerchantView", () => {
     expect(card.textContent).toContain("Needs review");
     expect(card.textContent).not.toContain("PRIVATE STATEMENT DESCRIPTOR");
     fireEvent.click(within(card).getByRole("button", { name: "Review in activity" }));
-    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: undefined, offset: undefined, query: undefined, selected: undefined, state: "unresolved" });
+    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: undefined, merchant: undefined, offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: "transaction-3" });
   });
 
-  it("applies the place search patch without exposing its label as a descriptor", () => {
+  it("uses the structured merchant filter for messy place aliases", () => {
     const onShowActivity = vi.fn();
     render(<MerchantView scope="All local activity" flows={scopeFlows} peoplePlaces={[group({})]} onShowActivity={onShowActivity} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
-    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: undefined, offset: undefined, query: "Cafe North", selected: undefined, state: undefined });
+    expect(onShowActivity).toHaveBeenCalledWith({ counterparty: undefined, merchant: "Cafe North", offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: undefined });
   });
 
   it("uses scoped empty and direct local error messages", () => {

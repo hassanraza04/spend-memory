@@ -69,6 +69,7 @@ def _has_scope(request: EntityQuery, *, include_currency: bool = True) -> bool:
             request.category,
             request.counterparty,
             request.state,
+            request.unresolved_group,
             request.query,
         )
     )
@@ -92,6 +93,7 @@ def _scoped_rows(
             amount_min_minor=request.amount_min_minor,
             amount_max_minor=request.amount_max_minor,
             state=request.state,
+            unresolved_group=request.unresolved_group,
             text=text,
         ),
         include_all=not text,
@@ -234,7 +236,7 @@ def list_recurring(
             }
             evidence = [
                 item for item in evidence
-                if item.transaction_ids and set(item.transaction_ids) <= scoped_ids
+                if item.transaction_ids and not set(item.transaction_ids).isdisjoint(scoped_ids)
             ]
         return _page(_ordered([
             RecurringCandidateResponse(**item.__dict__) for item in evidence

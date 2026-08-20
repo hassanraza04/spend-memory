@@ -11,15 +11,16 @@ test("opens grouped place activity inside the synthetic demo scope", async ({ pa
   await expect(card).toContainText("3 transactions");
   await expect(card).toContainText("AED\u00a0276.00");
   await card.getByRole("button", { name: "Show activity" }).click();
-  await expect(page).toHaveURL(/view=all-activity.*after=2026-01-01.*before=2026-04-01.*q=MetroMart/);
+  await expect(page).toHaveURL(/view=all-activity.*after=2026-01-01.*before=2026-04-01.*merchant=MetroMart/);
   await expect(page.getByRole("heading", { name: "All activity" })).toBeVisible();
 });
 
-test("shows a recurring pattern from the synthetic demo", async ({ page, freshRecord }) => {
+test("shows a recurring pattern in the default April synthetic demo", async ({ page, freshRecord }) => {
   await freshRecord();
-  await resetDemo(page, "?after=2026-01-01&before=2026-05-01");
+  await resetDemo(page, "");
+  await expect(page).toHaveURL(/after=2026-04-01.*before=2026-05-01/);
   await page.getByRole("link", { name: "Patterns" }).click();
-  await expect(page).toHaveURL(/view=patterns.*after=2026-01-01.*before=2026-05-01/);
+  await expect(page).toHaveURL(/view=patterns.*after=2026-04-01.*before=2026-05-01/);
   await expect(page.getByRole("heading", { name: "The payments that keep coming back" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Streambox" })).toBeVisible();
 });

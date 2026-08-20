@@ -43,6 +43,10 @@ class _Recurring:
     transaction_ids: tuple[UUID, ...]
     expected_next_start: str
     expected_next_end: str
+    currency: str = "AED"
+    amount_min_minor: int = 2999
+    amount_max_minor: int = 3050
+    observation_count: int = 3
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,10 @@ class _Review:
     confidence: float
     evidence: dict[str, object]
     transaction_ids: tuple[UUID, ...]
+    currency: str = "AED"
+    amount_minor: int = 12500
+    observation_count: int = 2
+    date_distance_days: int | None = 0
 
 
 class _Entities:
@@ -191,6 +199,23 @@ class _ScopedEntities(_Entities):
         ]
 
 
+class _AprilRecurringEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [_row(13, date(2026, 4, 3), "STREAMBOX APRIL", 2999)]
+
+
+class _TwoUnresolvedEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [
+            _row(21, date(2026, 4, 1), "PRIVATE ALIAS A", 100),
+            _row(22, date(2026, 4, 2), "PRIVATE ALIAS A", 200),
+            _row(23, date(2026, 4, 3), "PRIVATE ALIAS B", 300),
+        ]
+
+    def list_merchant_evidence(self) -> list[_Merchant]:
+        return []
+
+
 class _Refresh:
     def refresh(self) -> None:
         pass
@@ -221,6 +246,14 @@ def test_entities_expose_candidate_evidence_without_changing_transactions(tmp_pa
         "00000000-0000-0000-0000-00000000000d",
     ]
     assert review.json()["items"][0]["kind"] == "duplicate"
+    assert recurring.json()["items"][0]["currency"] == "AED"
+    assert recurring.json()["items"][0]["amount_min_minor"] == 2999
+    assert recurring.json()["items"][0]["amount_max_minor"] == 3050
+    assert recurring.json()["items"][0]["observation_count"] == 3
+    assert review.json()["items"][0]["currency"] == "AED"
+    assert review.json()["items"][0]["amount_minor"] == 12500
+    assert review.json()["items"][0]["observation_count"] == 2
+    assert review.json()["items"][0]["date_distance_days"] == 0
     assert recurring.json()["items"][0]["expected_next_start"] == "2026-04-01"
     assert repository.aliases == repository.overrides == []
 
@@ -332,6 +365,45 @@ def test_people_places_honours_every_activity_filter(tmp_path: Path) -> None:
     assert [(item["kind"], item["transactionCount"]) for item in category] == [("place", 2)]
     assert [(item["kind"], item["transactionCount"]) for item in state] == [("unresolved", 2)]
     assert [(item["kind"], item["transactionCount"]) for item in counterparty] == [("person", 1)]
+
+
+def test_people_places_navigation_uses_merchant_aliases_and_one_opaque_unresolved_group(
+    tmp_path: Path,
+) -> None:
+    alias_activity = _client(tmp_path, _GroupedEntities()).get(
+        "/api/v1/transactions?merchant=MetroMart"
+    )
+    assert alias_activity.status_code == 200
+    assert {item["description"] for item in alias_activity.json()["items"]} == {
+        "METROMART ONE",
+        "METROMART TWO",
+        "METROMART FEB",
+    }
+
+    client = _client(tmp_path, _TwoUnresolvedEntities())
+    groups = client.get("/api/v1/people-places").json()["items"]
+    assert len(groups) == 2
+    two_item_group = next(item for item in groups if item["transactionCount"] == 2)
+    token = two_item_group["key"].removeprefix("unresolved:")
+    activity = client.get(f"/api/v1/transactions?unresolved_group={token}")
+
+    assert activity.status_code == 200
+    assert activity.json()["total"] == 2
+    assert {item["description"] for item in activity.json()["items"]} == {
+        "PRIVATE ALIAS A"
+    }
+
+
+def test_recurring_scope_keeps_history_when_one_candidate_member_is_in_april(
+    tmp_path: Path,
+) -> None:
+    response = _client(tmp_path, _AprilRecurringEntities()).get(
+        "/api/v1/recurring?after=2026-04-01&before=2026-05-01"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["label"] == "StreamBox"
 
 
 def test_categories_and_candidates_use_the_same_complete_scoped_evidence(

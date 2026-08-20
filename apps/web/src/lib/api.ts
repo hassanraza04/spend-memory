@@ -38,6 +38,7 @@ export type Transaction = {
   currency: string;
   amount_minor: number;
   direction: Direction;
+  merchant_id?: string | null;
   merchant: string | null;
   category: string;
   counterparty: string | null;
@@ -54,14 +55,14 @@ export type Transaction = {
 
 export type Page<T> = { items: T[]; limit: number; offset: number; total: number };
 export type TransactionScope = Record<string, string | undefined>;
-export type SearchResult = { query: string; items: Transaction[]; lens: CurrencyFlow[] };
+export type SearchResult = Page<Transaction> & { query: string; lens: CurrencyFlow[] };
 export type Counterparty = { counterparty_id: string; label: string };
 export type Evidence = Record<string, string | number>;
 export type MerchantEvidence = { transaction_id: string; merchant_id: string | null; merchant_name: string | null; status: string; confidence: number; method: string; evidence: Evidence };
 export type Category = { category_id: string; label: string; lens: CurrencyFlow[] };
 export type PeoplePlace = { key: string; label: string; kind: "person" | "place" | "unresolved"; status: "confirmed" | "unresolved"; transactionCount: number; lastActivityDate: string; flows: CurrencyFlow[]; recentTransactionIds: string[] };
-export type RecurringCandidate = { candidate_id: string; label: string; cadence: string; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; expected_next_start: string; expected_next_end: string };
-export type ReviewCandidate = { candidate_id: string; kind: "duplicate" | "unusual_spend"; status: string; confidence: number; evidence: Evidence; transaction_ids: string[] };
+export type RecurringCandidate = { candidate_id: string; label: string; cadence: string; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; expected_next_start: string; expected_next_end: string; currency: string; amount_min_minor: number; amount_max_minor: number; observation_count: number };
+export type ReviewCandidate = { candidate_id: string; kind: "duplicate" | "unusual_spend"; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; currency: string; amount_minor: number; observation_count: number; date_distance_days: number | null };
 export type PeriodContribution = { label: string; amount_minor: number; before_transaction_ids: string[]; after_transaction_ids: string[] };
 export type PeriodExplanation = { before_net_amount_minor: number; after_net_amount_minor: number; difference_net_amount_minor: number; contribution_total_minor: number; remainder_minor: number; text: string; contributions: PeriodContribution[]; before_transaction_ids: string[]; after_transaction_ids: string[] };
 

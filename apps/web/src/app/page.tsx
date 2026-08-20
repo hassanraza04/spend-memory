@@ -20,11 +20,11 @@ const api = new ApiClient();
 const demoWorkspaceKey = "spend-memory-demo-workspace";
 
 function apiScope(state: WorkspaceState): Record<string, string | undefined> {
-  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset, query: state.query };
+  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, unresolved_group: state.unresolvedGroup, sort: state.sort, order: state.order, limit: state.limit, offset: state.offset, query: state.query };
 }
 
 function peoplePlacesScope(state: WorkspaceState): Record<string, string | undefined> {
-  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, query: state.query };
+  return { after: state.after, before: state.before, account: state.account, currency: state.currency, direction: state.direction, amount_min_minor: state.amountMinMinor, amount_max_minor: state.amountMaxMinor, merchant: state.merchant, category: state.category, counterparty: state.counterparty, state: state.state, unresolved_group: state.unresolvedGroup, query: state.query };
 }
 
 function comparisonScope(state: WorkspaceState, context?: WorkspaceContext): Record<string, string | undefined> {
@@ -33,7 +33,13 @@ function comparisonScope(state: WorkspaceState, context?: WorkspaceContext): Rec
   const start = Date.parse(`${after}T00:00:00Z`);
   const end = Date.parse(`${before}T00:00:00Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return {};
-  const beforeStart = new Date(start - (end - start)).toISOString().slice(0, 10);
+  const startDate = new Date(start);
+  const calendarEnd = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 1);
+  const beforeStart = new Date(
+    startDate.getUTCDate() === 1 && end === calendarEnd
+      ? Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() - 1, 1)
+      : start - (end - start),
+  ).toISOString().slice(0, 10);
   const validPair = context.accounts.some((option) => option.account === account && option.currencies.includes(currency));
   if (!validPair) return {};
   return { before_start: beforeStart, before_end: after, after_start: after, after_end: before, account, currency };
@@ -102,7 +108,7 @@ export default function Page() {
     const scope = apiScope(state);
     const workspace = api.listTransactions({ limit: "1" });
     const load = state.query
-      ? Promise.all([api.searchTransactions({ ...scope, query: state.query }), workspace]).then(([result, all]) => ({ page: { items: result.items, total: result.items.length, limit: result.items.length || 1, offset: 0 }, lens: { lens: result.lens, trend: [] }, hasWorkspace: all.total > 0 }))
+      ? Promise.all([api.searchTransactions({ ...scope, query: state.query }), workspace]).then(([result, all]) => ({ page: { items: result.items, total: result.total, limit: result.limit, offset: result.offset }, lens: { lens: result.lens, trend: [] }, hasWorkspace: all.total > 0 }))
       : Promise.all([api.listTransactions(scope), api.getLens(scope), workspace]).then(([page, nextLens, all]) => ({ page, lens: nextLens, hasWorkspace: all.total > 0 }));
     void load.then((result) => { if (current && loadId === activityLoad.current) { setTransactions(result.page); setLens(result.lens); setHasWorkspace(result.hasWorkspace); } }).catch(() => { if (current && loadId === activityLoad.current) { setTransactions(null); setLens(null); setHasWorkspace(false); } });
     return () => { current = false; };
@@ -146,6 +152,11 @@ export default function Page() {
     setContextRevision((value) => value + 1);
   }
 
+  async function correctMerchant(merchantId: string, descriptor: string) {
+    await api.correctMerchant(merchantId, descriptor);
+    setActivityRevision((value) => value + 1);
+  }
+
   function leaveDemoWorkspace() {
     try {
       window.localStorage.removeItem(demoWorkspaceKey);
@@ -173,7 +184,7 @@ export default function Page() {
         {view === "patterns" && <><RecurringView scope={scope} recurring={recurring} loadError={recurringError} /><ReviewView review={review} loadError={reviewError} /></>}
         {view === "compare" && comparisonView}
         {(view === "this-month" || view === "all-activity") && <TransactionLedger page={transactions} lens={lens} state={state} onScopeChange={changeScope} onSelect={select} selectedForGrouping={groupIds} onToggleGrouping={toggleGrouping} />}
-        {(view === "this-month" || view === "all-activity") && activeSelected && <SourcePanel transaction={activeSelected} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
+        {(view === "this-month" || view === "all-activity") && activeSelected && <SourcePanel key={activeSelected.transaction_id} transaction={activeSelected} onCorrectMerchant={correctMerchant} onClose={() => { setSelected(null); changeScope({ selected: undefined }); }} />}
         {groupIds.length > 0 && <CounterpartyEditor transactionIds={groupIds} descriptor={groupIds.length === 1 ? activeSelected?.description ?? "" : ""} onSaved={() => setActivityRevision((value) => value + 1)} />}
       </>}
     </AppShell>

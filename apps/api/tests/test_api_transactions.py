@@ -73,6 +73,7 @@ def test_transactions_page_trusted_rows_and_source_evidence(tmp_path: Path) -> N
                 "currency": "AED",
                 "amount_minor": 1200,
                 "direction": "debit",
+                "merchant_id": None,
                 "merchant": None,
                 "category": "uncategorized",
                 "counterparty": None,
@@ -230,7 +231,10 @@ def test_transactions_use_the_local_database_connection_mode(tmp_path: Path) -> 
     assert response.status_code == 200
 
 
-def test_review_evidence_uses_the_local_database_connection_mode(tmp_path: Path) -> None:
+def test_review_evidence_uses_the_local_database_connection_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     database_path = _build_fixture_database(tmp_path)
     _dbt_build(database_path, "mart_transactions")
     EnrichmentService(EnrichmentRepository(database_path)).refresh()
@@ -241,6 +245,11 @@ def test_review_evidence_uses_the_local_database_connection_mode(tmp_path: Path)
         merchants = client.get("/api/v1/merchants")
         categories = client.get("/api/v1/categories")
         recurring = client.get("/api/v1/recurring")
+
+        def reject_search_rows(_repository: EnrichmentRepository) -> None:
+            raise AssertionError("review evidence must use its existing joined query")
+
+        monkeypatch.setattr(EnrichmentRepository, "list_search_rows", reject_search_rows)
         review = client.get("/api/v1/review")
 
     assert merchants.status_code == categories.status_code == recurring.status_code == review.status_code == 200

@@ -87,6 +87,7 @@ class EntityQuery(PageRequest):
     category: str | None = None
     counterparty: str | None = None
     state: str | None = None
+    unresolved_group: UUID | None = None
     query: str | None = None
 
     @model_validator(mode="after")
@@ -127,6 +128,7 @@ class TransactionResponse(BaseModel):
     currency: str
     amount_minor: int
     direction: Direction
+    merchant_id: UUID | None
     merchant: str | None
     category: str
     counterparty: str | None
@@ -146,6 +148,7 @@ class TransactionFilters(TransactionQuery):
     category: str | None = None
     counterparty: str | None = None
     state: str | None = None
+    unresolved_group: UUID | None = None
     query: str | None = None
 
     @model_validator(mode="after")
@@ -197,6 +200,9 @@ class SearchResponse(BaseModel):
     query: str
     items: list[TransactionResponse]
     lens: tuple[CurrencyFlowResponse, ...]
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    total: int = Field(ge=0)
 
 
 class ImportResponse(BaseModel):
@@ -326,6 +332,10 @@ class RecurringCandidateResponse(BaseModel):
     transaction_ids: tuple[UUID, ...]
     expected_next_start: date
     expected_next_end: date
+    currency: str
+    amount_min_minor: int = Field(ge=0)
+    amount_max_minor: int = Field(ge=0)
+    observation_count: int = Field(ge=1)
 
 
 class ReviewCandidateResponse(BaseModel):
@@ -335,6 +345,10 @@ class ReviewCandidateResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence: dict[str, str | int | float]
     transaction_ids: tuple[UUID, ...]
+    currency: str
+    amount_minor: int = Field(ge=0)
+    observation_count: int = Field(ge=1)
+    date_distance_days: int | None = Field(default=None, ge=0)
 
 
 class MerchantCorrectionRequest(BaseModel):

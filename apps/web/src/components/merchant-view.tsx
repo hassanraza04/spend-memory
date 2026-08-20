@@ -5,7 +5,7 @@ import type { CurrencyFlow, PeoplePlace } from "../lib/api";
 import { formatMoney } from "../lib/format";
 import { LensSummary } from "./lens-summary";
 
-type ActivityPatch = { counterparty?: string; offset?: string; query?: string; selected?: string; state?: string };
+type ActivityPatch = { counterparty?: string; merchant?: string; offset?: string; query?: string; selected?: string; state?: string; unresolvedGroup?: string };
 
 const sections = [
   { kind: "person", title: "People and transfers" },
@@ -14,9 +14,9 @@ const sections = [
 ] as const;
 
 function activityPatch(group: PeoplePlace): ActivityPatch {
-  if (group.kind === "person") return { counterparty: group.label, offset: undefined, query: undefined, selected: undefined, state: undefined };
-  if (group.kind === "place") return { counterparty: undefined, offset: undefined, query: group.label, selected: undefined, state: undefined };
-  return { counterparty: undefined, offset: undefined, query: undefined, selected: undefined, state: "unresolved" };
+  if (group.kind === "person") return { counterparty: group.label, merchant: undefined, offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: undefined };
+  if (group.kind === "place") return { counterparty: undefined, merchant: group.label, offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: undefined };
+  return { counterparty: undefined, merchant: undefined, offset: undefined, query: undefined, selected: undefined, state: undefined, unresolvedGroup: group.key.replace("unresolved:", "") };
 }
 
 function GroupCard({ group, onShowActivity }: Readonly<{ group: PeoplePlace; onShowActivity: (patch: ActivityPatch) => void }>) {

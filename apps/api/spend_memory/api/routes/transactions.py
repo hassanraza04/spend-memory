@@ -35,6 +35,7 @@ def serialize_transaction(row: SearchRow) -> TransactionResponse:
         currency=transaction.currency,
         amount_minor=transaction.amount_minor,
         direction=transaction.direction,
+        merchant_id=row.merchant_id,
         merchant=row.merchant_name,
         category=row.category.category_label,
         counterparty=row.counterparty_label,
@@ -63,6 +64,7 @@ def query_from(filters: TransactionFilters, text: str | None = None) -> SearchQu
         amount_min_minor=filters.amount_min_minor,
         amount_max_minor=filters.amount_max_minor,
         state=filters.state,
+        unresolved_group=filters.unresolved_group,
         text=(filters.query or "").strip() if text is None else text,
     )
 

@@ -47,7 +47,7 @@ describe("home page", () => {
 
     render(<Page />);
 
-    expect(await screen.findByText("April activity")).toBeTruthy();
+    expect(await screen.findByText("MetroMart")).toBeTruthy();
     expect(requests[0]).toBe("/api/v1/workspace-context");
     expect(requests).toContain("/api/v1/transactions?after=2026-04-01&before=2026-05-01");
     expect(window.location.search).toContain("after=2026-04-01");
@@ -72,7 +72,7 @@ describe("home page", () => {
 
     render(<Page />);
 
-    expect(await screen.findByText("Partial range activity")).toBeTruthy();
+    expect(await screen.findByText("MetroMart")).toBeTruthy();
     expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain("/api/v1/workspace-context");
   });
 
@@ -96,8 +96,8 @@ describe("home page", () => {
 
     render(<Page />);
 
-    await screen.findByText("Group me");
-    fireEvent.click(screen.getByLabelText("Group Group me"));
+    await screen.findByText("MetroMart");
+    fireEvent.click(screen.getByLabelText("Group MetroMart"));
     fireEvent.change(screen.getByLabelText("Counterparty name"), { target: { value: "Rina" } });
     fireEvent.click(screen.getByRole("button", { name: "Create and group" }));
 
@@ -126,7 +126,7 @@ describe("home page", () => {
     const demo = await screen.findByRole("button", { name: "Explore the synthetic demo" });
     fireEvent.click(demo);
 
-    expect(await screen.findByText("Reset demo activity")).toBeTruthy();
+    expect(await screen.findByText("MetroMart")).toBeTruthy();
     expect(window.location.search).toBe("?after=2026-04-01&before=2026-05-01");
     expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain("/api/v1/workspace-context");
   });
@@ -206,8 +206,31 @@ describe("home page", () => {
     expect(window.location.search).toContain("currency=AED");
     expect(replaceState).toHaveBeenCalledOnce();
     expect(requests.filter((path) => path.includes("/comparisons"))).toEqual([
-      "/api/v1/comparisons?before_start=2026-03-02&before_end=2026-04-01&after_start=2026-04-01&after_end=2026-05-01&account=Daily&currency=AED",
+      "/api/v1/comparisons?before_start=2026-03-01&before_end=2026-04-01&after_start=2026-04-01&after_end=2026-05-01&account=Daily&currency=AED",
     ]);
+  });
+
+  it("keeps equal-length comparison subtraction for a custom period", async () => {
+    window.history.replaceState({}, "", "/?view=compare&after=2026-04-02&before=2026-05-02&account=Daily&currency=AED");
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      const path = String(url);
+      requests.push(path);
+      return Promise.resolve(new Response(JSON.stringify(
+        path.includes("/workspace-context")
+          ? { firstTransactionDate: "2026-03-01", lastTransactionDate: "2026-05-01", latestMonthStart: "2026-05-01", latestMonthEnd: "2026-06-01", accounts: [{ account: "Daily", currencies: ["AED"] }] }
+          : path.includes("/comparisons")
+            ? { before_net_amount_minor: -1000, after_net_amount_minor: -700, difference_net_amount_minor: 300, contribution_total_minor: 300, remainder_minor: 0, text: "Custom range compared.", contributions: [], before_transaction_ids: ["a"], after_transaction_ids: ["b"] }
+            : path.includes("/lens")
+              ? { lens: [], trend: [] }
+              : { items: [{}], total: 1, limit: 1, offset: 0 },
+      ), { status: 200 }));
+    }));
+
+    render(<Page />);
+
+    expect(await screen.findByText("Custom range compared.")).toBeTruthy();
+    expect(requests).toContain("/api/v1/comparisons?before_start=2026-03-03&before_end=2026-04-02&after_start=2026-04-02&after_end=2026-05-02&account=Daily&currency=AED");
   });
 
   it("explains when the comparison endpoint finds no matching earlier period", async () => {
@@ -234,7 +257,7 @@ describe("home page", () => {
     };
     vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
       String(url).includes("/search")
-        ? { query: "MetroMart", items: [transaction], lens: [{ currency: "AED", sent_minor: 1234, received_minor: 567, net_minor: -667, transaction_count: 2 }, { currency: "USD", sent_minor: 890, received_minor: 0, net_minor: -890, transaction_count: 1 }] }
+        ? { query: "MetroMart", items: [transaction], total: 3, limit: 50, offset: 0, lens: [{ currency: "AED", sent_minor: 1234, received_minor: 567, net_minor: -667, transaction_count: 2 }, { currency: "USD", sent_minor: 890, received_minor: 0, net_minor: -890, transaction_count: 1 }] }
         : { items: [transaction], total: 1, limit: 1, offset: 0 },
     ), { status: 200 }))));
 
@@ -250,10 +273,10 @@ describe("home page", () => {
   });
 
   it("keeps a search lens summary when its visible page has no rows", async () => {
-    window.history.replaceState({}, "", "/?q=MetroMart&after=2026-01-01&before=2026-02-01&offset=1");
+    window.history.replaceState({}, "", "/?q=MetroMart&after=2026-01-01&before=2026-02-01&limit=1&offset=2");
     vi.stubGlobal("fetch", vi.fn((url) => Promise.resolve(new Response(JSON.stringify(
       String(url).includes("/search")
-        ? { query: "MetroMart", items: [], lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }] }
+        ? { query: "MetroMart", items: [], total: 2, limit: 1, offset: 2, lens: [{ currency: "AED", sent_minor: 1234, received_minor: 0, net_minor: -1234, transaction_count: 2 }] }
         : { items: [{}], total: 1, limit: 1, offset: 0 },
     ), { status: 200 }))));
 
@@ -263,6 +286,34 @@ describe("home page", () => {
     expect(summary.textContent).toContain("AED 12.34");
     expect(summary.textContent).toContain("Entries2");
     expect(summary.textContent).not.toContain("0 matching entries");
+    expect(screen.getByText("2 trusted entries")).toBeTruthy();
+  });
+
+  it("saves a merchant correction from source detail and refreshes activity", async () => {
+    window.history.replaceState({}, "", "/?view=all-activity&after=2026-04-01&before=2026-05-01");
+    const transaction = {
+      transaction_id: "00000000-0000-0000-0000-000000000041", transaction_date: "2026-04-10", account: "Daily", description: "CAFE NORTH POS 8841", currency: "AED", amount_minor: 1200, direction: "debit", merchant_id: "00000000-0000-0000-0000-000000000042", merchant: "Cafe North", category: "Dining", counterparty: null, state: "confirmed", source: { document: "april.csv", ordinal: 1, page: null, row: 2, text: "CAFE NORTH POS 8841", extraction_confidence: 0.98 },
+    };
+    let activityLoads = 0;
+    const fetchMock = vi.fn((url: string | URL, init?: { method?: string }) => {
+      const path = String(url);
+      if (init?.method === "PATCH") return Promise.resolve(new Response(JSON.stringify({ status: "saved" }), { status: 200 }));
+      if (path.includes("/lens")) return Promise.resolve(new Response(JSON.stringify({ lens: [], trend: [] }), { status: 200 }));
+      if (path.includes("/transactions?after=")) activityLoads += 1;
+      return Promise.resolve(new Response(JSON.stringify({ items: [transaction], total: 1, limit: 50, offset: 0 }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Page />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /Cafe North/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use this statement label for Cafe North" }));
+    expect(await screen.findByText("Merchant correction saved.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/merchants/00000000-0000-0000-0000-000000000042",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ descriptor: "CAFE NORTH POS 8841" }) }),
+    );
+    await waitFor(() => expect(activityLoads).toBeGreaterThan(1));
   });
 
   it("restores URL-selected source evidence after loading its row", async () => {
@@ -285,7 +336,7 @@ describe("home page", () => {
     vi.stubGlobal("fetch", vi.fn((url) => {
       requests.push(String(url));
       return Promise.resolve(new Response(JSON.stringify(
-      String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("/recurring") ? { items: [{ candidate_id: "r1", label: "Music", cadence: "monthly", status: "suggested", confidence: 0.9, evidence: {}, transaction_ids: ["t1"], expected_next_start: "2026-09-01", expected_next_end: "2026-09-03" }], total: 1, limit: 100, offset: 0 } : String(url).includes("/review") ? { items: [], total: 0, limit: 100, offset: 0 } : { items: [{}], total: 1, limit: 1, offset: 0 },
+      String(url).includes("/lens") ? { lens: [], trend: [] } : String(url).includes("/recurring") ? { items: [{ candidate_id: "r1", label: "Music", cadence: "monthly", status: "suggested", confidence: 0.9, evidence: {}, transaction_ids: ["t1"], expected_next_start: "2026-09-01", expected_next_end: "2026-09-03", currency: "AED", amount_min_minor: 999, amount_max_minor: 1099, observation_count: 4 }], total: 1, limit: 100, offset: 0 } : String(url).includes("/review") ? { items: [], total: 0, limit: 100, offset: 0 } : { items: [{}], total: 1, limit: 1, offset: 0 },
     ), { status: 200 }));
     }));
 
@@ -322,7 +373,7 @@ describe("home page", () => {
         path.includes("/lens")
           ? { lens: [{ currency: "AED", sent_minor: 1200, received_minor: 0, net_minor: -1200, transaction_count: 1 }], trend: [] }
           : path.includes("/search")
-            ? { query: "MetroMart", items: [], lens: [{ currency: "AED", sent_minor: 25000, received_minor: 0, net_minor: -25000, transaction_count: 2 }] }
+            ? { query: "MetroMart", items: [], total: 2, limit: 25, offset: 50, lens: [{ currency: "AED", sent_minor: 25000, received_minor: 0, net_minor: -25000, transaction_count: 2 }] }
           : path.includes("/people-places")
             ? { items: [{ key: "merchant:metro", label: "MetroMart", kind: "place", status: "confirmed", transactionCount: 2, lastActivityDate: "2026-04-12", flows: [{ currency: "AED", sent_minor: 25000, received_minor: 0, net_minor: -25000, transaction_count: 2 }], recentTransactionIds: ["t2", "t1"] }], total: 1, limit: 50, offset: 0 }
             : path.includes("/transactions")
@@ -341,7 +392,7 @@ describe("home page", () => {
     expect(requests.some((path) => path.includes("/categories"))).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     expect(await screen.findByRole("heading", { name: "All activity" })).toBeTruthy();
-    expect(window.location.search).toBe("?view=all-activity&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&q=MetroMart&merchant=MetroMart&category=Groceries&direction=debit&amount_min_minor=500&amount_max_minor=30000&sort=amount&order=desc&limit=25");
+    expect(window.location.search).toBe("?view=all-activity&after=2026-04-01&before=2026-05-01&account=Daily&currency=AED&merchant=MetroMart&category=Groceries&direction=debit&amount_min_minor=500&amount_max_minor=30000&sort=amount&order=desc&limit=25");
   });
 
   it("never opens selected source evidence in people and places", async () => {
