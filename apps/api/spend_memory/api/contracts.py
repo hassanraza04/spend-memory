@@ -62,6 +62,11 @@ class EntityStatus(StrEnum):
     unresolved = "unresolved"
 
 
+class Direction(StrEnum):
+    debit = "debit"
+    credit = "credit"
+
+
 class TransactionQuery(PageRequest):
     sort: TransactionSort = TransactionSort.date
     order: SortOrder = SortOrder.descending
@@ -71,19 +76,39 @@ class EntityQuery(PageRequest):
     sort: EntitySort = EntitySort.label
     order: SortOrder = SortOrder.ascending
     status: EntityStatus | None = None
+    after: date | None = None
+    before: date | None = None
+    account: str | None = None
+    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    direction: Direction | None = None
+    amount_min_minor: int | None = Field(default=None, ge=0)
+    amount_max_minor: int | None = Field(default=None, ge=0)
+    merchant: str | None = None
+    category: str | None = None
+    counterparty: str | None = None
+    state: str | None = None
+    unresolved_group: UUID | None = None
+    query: str | None = None
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "EntityQuery":
+        if self.after is not None and self.before is not None and self.after >= self.before:
+            raise ValueError("after_must_precede_before")
+        if (
+            self.amount_min_minor is not None
+            and self.amount_max_minor is not None
+            and self.amount_min_minor > self.amount_max_minor
+        ):
+            raise ValueError("amount_min_must_not_exceed_max")
+        return self
 
 
 class CategoryQuery(EntityQuery):
-    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    pass
 
 
 class TransactionPath(BaseModel):
     transaction_id: UUID
-
-
-class Direction(StrEnum):
-    debit = "debit"
-    credit = "credit"
 
 
 class SourceEvidenceResponse(BaseModel):
@@ -103,6 +128,7 @@ class TransactionResponse(BaseModel):
     currency: str
     amount_minor: int
     direction: Direction
+    merchant_id: UUID | None
     merchant: str | None
     category: str
     counterparty: str | None
@@ -122,6 +148,8 @@ class TransactionFilters(TransactionQuery):
     category: str | None = None
     counterparty: str | None = None
     state: str | None = None
+    unresolved_group: UUID | None = None
+    query: str | None = None
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "TransactionFilters":
@@ -153,10 +181,28 @@ class WorkspaceLensResponse(BaseModel):
     trend: tuple[TrendBucketResponse, ...]
 
 
+class WorkspaceAccountResponse(BaseModel):
+    account: str
+    currencies: tuple[str, ...]
+
+
+class WorkspaceContextResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    first_transaction_date: date | None = Field(alias="firstTransactionDate")
+    last_transaction_date: date | None = Field(alias="lastTransactionDate")
+    latest_month_start: date | None = Field(alias="latestMonthStart")
+    latest_month_end: date | None = Field(alias="latestMonthEnd")
+    accounts: tuple[WorkspaceAccountResponse, ...]
+
+
 class SearchResponse(BaseModel):
     query: str
     items: list[TransactionResponse]
     lens: tuple[CurrencyFlowResponse, ...]
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    total: int = Field(ge=0)
 
 
 class ImportResponse(BaseModel):
@@ -263,6 +309,19 @@ class CategoryResponse(BaseModel):
     lens: tuple[CurrencyFlowResponse, ...]
 
 
+class PeoplePlaceResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    key: str
+    label: str
+    kind: Literal["person", "place", "unresolved"]
+    status: Literal["confirmed", "unresolved"]
+    transaction_count: int = Field(alias="transactionCount", ge=1)
+    last_activity_date: date = Field(alias="lastActivityDate")
+    flows: tuple[CurrencyFlowResponse, ...]
+    recent_transaction_ids: tuple[UUID, ...] = Field(alias="recentTransactionIds")
+
+
 class RecurringCandidateResponse(BaseModel):
     candidate_id: UUID
     label: str
@@ -273,6 +332,10 @@ class RecurringCandidateResponse(BaseModel):
     transaction_ids: tuple[UUID, ...]
     expected_next_start: date
     expected_next_end: date
+    currency: str
+    amount_min_minor: int = Field(ge=0)
+    amount_max_minor: int = Field(ge=0)
+    observation_count: int = Field(ge=1)
 
 
 class ReviewCandidateResponse(BaseModel):
@@ -282,6 +345,10 @@ class ReviewCandidateResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence: dict[str, str | int | float]
     transaction_ids: tuple[UUID, ...]
+    currency: str
+    amount_minor: int = Field(ge=0)
+    observation_count: int = Field(ge=1)
+    date_distance_days: int | None = Field(default=None, ge=0)
 
 
 class MerchantCorrectionRequest(BaseModel):

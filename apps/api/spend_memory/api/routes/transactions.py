@@ -7,6 +7,7 @@ from spend_memory.api.contracts import (
     SourceEvidenceResponse,
     TransactionFilters,
     TransactionResponse,
+    WorkspaceContextResponse,
 )
 from spend_memory.api.dependencies import get_enrichment_repository
 from spend_memory.api.errors import ApiError
@@ -15,6 +16,13 @@ from spend_memory.enrichment.repository import EnrichmentRepository
 from spend_memory.enrichment.search import SearchRow, search_transactions
 
 router = APIRouter()
+
+
+@router.get("/workspace-context", response_model=WorkspaceContextResponse)
+def get_workspace_context(
+    repository: Annotated[EnrichmentRepository, Depends(get_enrichment_repository)],
+) -> WorkspaceContextResponse:
+    return WorkspaceContextResponse(**repository.workspace_context())
 
 
 def serialize_transaction(row: SearchRow) -> TransactionResponse:
@@ -27,6 +35,7 @@ def serialize_transaction(row: SearchRow) -> TransactionResponse:
         currency=transaction.currency,
         amount_minor=transaction.amount_minor,
         direction=transaction.direction,
+        merchant_id=row.merchant_id,
         merchant=row.merchant_name,
         category=row.category.category_label,
         counterparty=row.counterparty_label,
@@ -42,7 +51,7 @@ def serialize_transaction(row: SearchRow) -> TransactionResponse:
     )
 
 
-def query_from(filters: TransactionFilters, text: str = "") -> SearchQuery:
+def query_from(filters: TransactionFilters, text: str | None = None) -> SearchQuery:
     return SearchQuery(
         after=filters.after,
         before=filters.before,
@@ -55,7 +64,8 @@ def query_from(filters: TransactionFilters, text: str = "") -> SearchQuery:
         amount_min_minor=filters.amount_min_minor,
         amount_max_minor=filters.amount_max_minor,
         state=filters.state,
-        text=text,
+        unresolved_group=filters.unresolved_group,
+        text=(filters.query or "").strip() if text is None else text,
     )
 
 

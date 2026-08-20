@@ -33,4 +33,4 @@ def test_demo_reset_makes_trusted_activity_available_without_a_manual_refresh(
 
     assert reset.status_code == 200
     assert trusted.status_code == 200
-    assert trusted.json()["total"] == 18
+    assert trusted.json()["total"] == 28

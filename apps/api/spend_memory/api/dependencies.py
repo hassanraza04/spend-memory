@@ -45,6 +45,7 @@ class LocalDataService:
             declared_mime_type="text/csv",
         )
         service.repository.mark_document_as_demo(result.document_id)
+        _seed_demo_enrichment(EnrichmentRepository(self.settings.database_path))
         self.refresh.refresh()
 
     def delete(self) -> None:
@@ -128,24 +129,54 @@ def _safe_local_path(path: Path, root: Path) -> Path:
     return resolved_path
 
 
+def _seed_demo_enrichment(repository: EnrichmentRepository) -> None:
+    for merchant_name, descriptors, category_label in _DEMO_MERCHANTS:
+        merchant = repository.create_merchant(merchant_name)
+        for descriptor in descriptors:
+            repository.confirm_alias(descriptor, merchant.merchant_id)
+        repository.record_confirmed_merchant_currency(merchant.merchant_id, "AED")
+        category = repository.create_category(category_label)
+        repository.assign_merchant_category(merchant.merchant_id, category.category_id)
+
+
+_DEMO_MERCHANTS = (
+    ("Brew Lab", ("BREW-LAB",), "Dining"),
+    ("MetroMart", ("METROMART POS", "METRO MART MARKET"), "Groceries"),
+    ("Orbit Fuel", ("ORBIT FUEL",), "Transport"),
+    ("PixelBooks", ("PXLBKS",), "Books"),
+    ("Quick Cart", ("QKCRT",), "Shopping"),
+    ("Streambox", ("STREAMBOX MONTHLY",), "Entertainment"),
+)
+
+
 _DEMO_DOCUMENT = (
     b"transaction_id,posted_date,account_id,currency,amount_minor,description,transaction_type\n"
-    b"SYN-00835,2026-01-01,AED-SYNTH-001,AED,-10847,BREW-LAB,debit\n"
-    b"SYN-00834,2026-01-03,AED-SYNTH-001,AED,-13577,OrbitFuel Station,debit\n"
-    b"SYN-00837,2026-01-03,AED-SYNTH-001,AED,-2999,STREAMBOX MONTHLY,debit\n"
-    b"SYN-00830,2026-01-04,AED-SYNTH-001,AED,-13115,ORBIT FUEL,debit\n"
-    b"SYN-00825,2026-01-06,AED-SYNTH-001,AED,-3988,PXLBKS,debit\n"
-    b"SYN-00831,2026-01-06,AED-SYNTH-001,AED,-3936,QKCRT*ONLINE,debit\n"
-    b"SYN-00838,2026-01-06,AED-SYNTH-001,AED,-12999,ATLAS COVER ANNUAL,debit\n"
-    b"SYN-00836,2026-01-15,AED-SYNTH-001,AED,-13791,HBR PHARM,debit\n"
-    b"SYN-00832,2026-01-17,AED-SYNTH-001,AED,-12297,OrbitFuel Station,debit\n"
-    b"SYN-00826,2026-01-19,AED-SYNTH-001,AED,-5615,MetroMart POS,debit\n"
-    b"SYN-00828,2026-01-20,AED-SYNTH-001,AED,-10569,ORBIT-FUEL,debit\n"
-    b"SYN-00824,2026-01-22,AED-SYNTH-001,AED,-9340,Quick Cart,debit\n"
-    b"SYN-00833,2026-01-24,AED-SYNTH-001,AED,-14015,HBR PHARM,debit\n"
-    b"SYN-00829,2026-01-25,AED-SYNTH-001,AED,-18406,Harbor Pharm,debit\n"
-    b"SYN-00823,2026-01-26,AED-SYNTH-001,AED,-947,HARBOR PHARMACY,debit\n"
-    b"SYN-00827,2026-01-26,AED-SYNTH-001,AED,-3056,PixelBooks Online,debit\n"
-    b"SYN-00821,2026-01-27,AED-SYNTH-001,AED,-3927,HBR PHARM,debit\n"
-    b"SYN-00822,2026-01-27,AED-SYNTH-001,AED,-18054,ORBIT FUEL,debit\n"
+    b"SYN-00001,2026-01-01,AED-SYNTH-001,AED,5000,INCOMING TRANSFER,credit\n"
+    b"SYN-00002,2026-01-03,AED-SYNTH-001,AED,-2999,STREAMBOX MONTHLY,debit\n"
+    b"SYN-00003,2026-01-06,AED-SYNTH-001,AED,-850,BREW-LAB,debit\n"
+    b"SYN-00004,2026-01-09,AED-SYNTH-001,AED,-7200,METROMART POS,debit\n"
+    b"SYN-00005,2026-01-15,AED-SYNTH-001,AED,-13791,HBR PHARM,debit\n"
+    b"SYN-00006,2026-01-23,AED-SYNTH-001,AED,-23577,ORBIT FUEL,debit\n"
+    b"SYN-00007,2026-01-31,AED-SYNTH-001,AED,-3936,QKCRT*ONLINE,debit\n"
+    b"SYN-00008,2026-02-01,AED-SYNTH-001,AED,7500,BANK TRANSFER CREDIT,credit\n"
+    b"SYN-00009,2026-02-03,AED-SYNTH-001,AED,-3050,STREAMBOX MONTHLY,debit\n"
+    b"SYN-00010,2026-02-06,AED-SYNTH-001,AED,-3988,PXLBKS,debit\n"
+    b"SYN-00011,2026-02-12,AED-SYNTH-001,AED,-6500,METROMART POS,debit\n"
+    b"SYN-00012,2026-02-18,AED-SYNTH-001,AED,-16000,ORBIT FUEL,debit\n"
+    b"SYN-00013,2026-02-24,AED-SYNTH-001,AED,-4700,NOVA BAZAAR,debit\n"
+    b"SYN-00014,2026-02-28,AED-SYNTH-001,AED,-9340,QKCRT*ONLINE,debit\n"
+    b"SYN-00015,2026-03-01,AED-SYNTH-001,AED,10000,INCOMING TRANSFER,credit\n"
+    b"SYN-00016,2026-03-03,AED-SYNTH-001,AED,-2999,STREAMBOX MONTHLY,debit\n"
+    b"SYN-00017,2026-03-07,AED-SYNTH-001,AED,-1250,BREW-LAB,debit\n"
+    b"SYN-00018,2026-03-12,AED-SYNTH-001,AED,-13900,METROMART POS,debit\n"
+    b"SYN-00019,2026-03-19,AED-SYNTH-001,AED,-12297,ORBIT FUEL,debit\n"
+    b"SYN-00020,2026-03-26,AED-SYNTH-001,AED,-3056,PXLBKS,debit\n"
+    b"SYN-00021,2026-03-30,AED-SYNTH-001,AED,-2400,HBR PHARM,debit\n"
+    b"SYN-00022,2026-04-01,AED-SYNTH-001,AED,12500,TRANSFER RECEIVED,credit\n"
+    b"SYN-00023,2026-04-03,AED-SYNTH-001,AED,-3025,STREAMBOX MONTHLY,debit\n"
+    b"SYN-00024,2026-04-07,AED-SYNTH-001,AED,-1900,BREW-LAB,debit\n"
+    b"SYN-00025,2026-04-12,AED-SYNTH-001,AED,-12500,METROMART POS,debit\n"
+    b"SYN-00026,2026-04-12,AED-SYNTH-001,AED,-12500,METRO MART MARKET,debit\n"
+    b"SYN-00027,2026-04-20,AED-SYNTH-001,AED,-26920,QKCRT*ONLINE,debit\n"
+    b"SYN-00028,2026-04-30,AED-SYNTH-001,AED,-17800,NOVA BAZAAR,debit\n"
 )

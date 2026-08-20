@@ -7,7 +7,7 @@ test("exports the active trusted scope and requires exact local deletion confirm
   await importStatement(page, fixturePath("source", "aed_january_2026.csv"), "?after=2026-01-01&before=2026-02-01");
   await page.getByLabel("Search activity").fill("MetroMart POS");
   await page.getByRole("button", { name: "Apply filters" }).click();
-  await page.getByLabel("Group MetroMart POS").check();
+  await page.getByRole("row", { name: /2026-01-19.*Unresolved statement entry.*AED 56\.15/ }).getByLabel("Group Unresolved statement entry").check();
   await page.getByLabel("Counterparty name").fill("=Weekend groceries");
   await page.getByRole("button", { name: "Create and group" }).click();
   await expect(page.getByText("Grouped under =Weekend groceries.")).toBeVisible();
@@ -23,7 +23,7 @@ test("exports the active trusted scope and requires exact local deletion confirm
   expect(path).not.toBeNull();
   const csv = await readFile(path!, "utf8");
   const rows = csv.trimEnd().split(/\r?\n/);
-  expect(rows).toHaveLength(18);
+  expect(rows).toHaveLength(2);
   expect(rows[0]).toContain("transaction_id,transaction_date,account,description");
   expect(csv).toContain("MetroMart POS");
   expect(csv).not.toContain("BREW-LAB");

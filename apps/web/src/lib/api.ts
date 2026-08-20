@@ -22,6 +22,13 @@ export type CurrencyFlow = {
 export type TrendBucket = CurrencyFlow & { period_start: string };
 
 export type WorkspaceLens = { lens: CurrencyFlow[]; trend: TrendBucket[] };
+export type WorkspaceContext = {
+  firstTransactionDate: string | null;
+  lastTransactionDate: string | null;
+  latestMonthStart: string | null;
+  latestMonthEnd: string | null;
+  accounts: { account: string; currencies: string[] }[];
+};
 
 export type Transaction = {
   transaction_id: string;
@@ -31,6 +38,7 @@ export type Transaction = {
   currency: string;
   amount_minor: number;
   direction: Direction;
+  merchant_id?: string | null;
   merchant: string | null;
   category: string;
   counterparty: string | null;
@@ -47,13 +55,14 @@ export type Transaction = {
 
 export type Page<T> = { items: T[]; limit: number; offset: number; total: number };
 export type TransactionScope = Record<string, string | undefined>;
-export type SearchResult = { query: string; items: Transaction[]; lens: CurrencyFlow[] };
+export type SearchResult = Page<Transaction> & { query: string; lens: CurrencyFlow[] };
 export type Counterparty = { counterparty_id: string; label: string };
 export type Evidence = Record<string, string | number>;
 export type MerchantEvidence = { transaction_id: string; merchant_id: string | null; merchant_name: string | null; status: string; confidence: number; method: string; evidence: Evidence };
 export type Category = { category_id: string; label: string; lens: CurrencyFlow[] };
-export type RecurringCandidate = { candidate_id: string; label: string; cadence: string; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; expected_next_start: string; expected_next_end: string };
-export type ReviewCandidate = { candidate_id: string; kind: "duplicate" | "unusual_spend"; status: string; confidence: number; evidence: Evidence; transaction_ids: string[] };
+export type PeoplePlace = { key: string; label: string; kind: "person" | "place" | "unresolved"; status: "confirmed" | "unresolved"; transactionCount: number; lastActivityDate: string; flows: CurrencyFlow[]; recentTransactionIds: string[] };
+export type RecurringCandidate = { candidate_id: string; label: string; cadence: string; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; expected_next_start: string; expected_next_end: string; currency: string; amount_min_minor: number; amount_max_minor: number; observation_count: number };
+export type ReviewCandidate = { candidate_id: string; kind: "duplicate" | "unusual_spend"; status: string; confidence: number; evidence: Evidence; transaction_ids: string[]; currency: string; amount_minor: number; observation_count: number; date_distance_days: number | null };
 export type PeriodContribution = { label: string; amount_minor: number; before_transaction_ids: string[]; after_transaction_ids: string[] };
 export type PeriodExplanation = { before_net_amount_minor: number; after_net_amount_minor: number; difference_net_amount_minor: number; contribution_total_minor: number; remainder_minor: number; text: string; contributions: PeriodContribution[]; before_transaction_ids: string[]; after_transaction_ids: string[] };
 
@@ -103,6 +112,10 @@ export class ApiClient {
     return this.request<WorkspaceLens>(`/lens${query(scope)}`);
   }
 
+  async getWorkspaceContext(): Promise<WorkspaceContext> {
+    return this.request<WorkspaceContext>("/workspace-context");
+  }
+
   async searchTransactions(scope: TransactionScope): Promise<SearchResult> {
     return this.request<SearchResult>(`/search${query(scope)}`);
   }
@@ -120,6 +133,7 @@ export class ApiClient {
   }
 
   async listMerchants(scope: TransactionScope = {}): Promise<Page<MerchantEvidence>> { return this.request<Page<MerchantEvidence>>(`/merchants${query(scope)}`); }
+  async listPeoplePlaces(scope: TransactionScope = {}): Promise<Page<PeoplePlace>> { return this.request<Page<PeoplePlace>>(`/people-places${query(scope)}`); }
   async listCategories(scope: TransactionScope = {}): Promise<Page<Category>> { return this.request<Page<Category>>(`/categories${query(scope)}`); }
   async listRecurring(scope: TransactionScope = {}): Promise<Page<RecurringCandidate>> { return this.request<Page<RecurringCandidate>>(`/recurring${query(scope)}`); }
   async listReview(scope: TransactionScope = {}): Promise<Page<ReviewCandidate>> { return this.request<Page<ReviewCandidate>>(`/review${query(scope)}`); }

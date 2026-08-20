@@ -25,7 +25,7 @@ class _Counterparties:
     def list_counterparty_transactions(self, _: UUID) -> list[TrustedTransaction]:
         return [
             TrustedTransaction(UUID(int=1), "AED-001", date(2026, 1, 1), "Rina", "rina", "AED", 1200, "debit"),
-            TrustedTransaction(UUID(int=2), "AED-001", date(2026, 1, 2), "Rina", "rina", "AED", 200, "credit"),
+            TrustedTransaction(UUID(int=2), "AED-001", date(2026, 2, 1), "Rina", "rina", "AED", 200, "credit"),
         ]
 
     def create_counterparty(self, label: str) -> Counterparty:
@@ -105,15 +105,15 @@ def test_counterparty_creation_and_alias_confirmation_are_explicit_actions(
 def test_counterparty_list_and_lens_routes_keep_scope_and_money_typed(tmp_path: Path) -> None:
     client = _client(tmp_path)
 
-    listed = client.get("/api/v1/counterparties?currency=AED")
-    lens = client.get("/api/v1/counterparties/00000000-0000-0000-0000-000000000009/lens?after=2026-01-01")
+    listed = client.get("/api/v1/counterparties?currency=AED&after=2026-01-01&before=2026-02-01")
+    lens = client.get("/api/v1/counterparties/00000000-0000-0000-0000-000000000009/lens?after=2026-01-01&before=2026-02-01")
 
     assert listed.status_code == 200
     assert listed.json() == {
         "items": [{
             "counterparty_id": "00000000-0000-0000-0000-000000000009",
             "label": "Rina",
-            "lens": [{"currency": "AED", "sent_minor": 1200, "received_minor": 200, "net_minor": -1000, "transaction_count": 2}],
+            "lens": [{"currency": "AED", "sent_minor": 1200, "received_minor": 0, "net_minor": -1200, "transaction_count": 1}],
         }],
         "limit": 50,
         "offset": 0,
@@ -123,6 +123,6 @@ def test_counterparty_list_and_lens_routes_keep_scope_and_money_typed(tmp_path: 
     assert lens.json() == {
         "counterparty_id": "00000000-0000-0000-0000-000000000009",
         "label": "Rina",
-        "lens": [{"currency": "AED", "sent_minor": 0, "received_minor": 200, "net_minor": 200, "transaction_count": 1}],
-        "trend": [{"period_start": "2026-01-01", "currency": "AED", "sent_minor": 0, "received_minor": 200, "net_minor": 200, "transaction_count": 1}],
+        "lens": [{"currency": "AED", "sent_minor": 1200, "received_minor": 0, "net_minor": -1200, "transaction_count": 1}],
+        "trend": [{"period_start": "2026-01-01", "currency": "AED", "sent_minor": 1200, "received_minor": 0, "net_minor": -1200, "transaction_count": 1}],
     }

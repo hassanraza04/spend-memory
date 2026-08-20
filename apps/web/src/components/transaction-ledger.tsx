@@ -3,10 +3,11 @@
 
 import { useState } from "react";
 
-import type { Page, Transaction } from "../lib/api";
+import type { Page, Transaction, WorkspaceLens } from "../lib/api";
 import { formatMoney } from "../lib/format";
 import type { WorkspaceState } from "../lib/url-state";
 import { FilterControls } from "./filter-controls";
+import { LensSummary } from "./lens-summary";
 
 type Preset = "standard" | "compact" | "source";
 const presetKey = "spend-memory-column-preset";
@@ -24,8 +25,9 @@ function savePreset(preset: Preset) {
   try { window.localStorage?.setItem(presetKey, preset); } catch { /* ponytail: a session preset is enough when storage is unavailable. */ }
 }
 
-export function TransactionLedger({ page, state, onScopeChange, onSelect, selectedForGrouping = [], onToggleGrouping }: Readonly<{
+export function TransactionLedger({ page, lens, state, onScopeChange, onSelect, selectedForGrouping = [], onToggleGrouping }: Readonly<{
   page: Page<Transaction>;
+  lens: WorkspaceLens;
   state: WorkspaceState;
   onScopeChange: (patch: Partial<WorkspaceState>) => void;
   onSelect: (transaction: Transaction) => void;
@@ -44,11 +46,18 @@ export function TransactionLedger({ page, state, onScopeChange, onSelect, select
       <FilterControls state={state} onApply={onScopeChange} />
       {page.total === 0 ? <p className="empty-note">No trusted activity matches this scope.</p> : (
         <div className="ledger-scroll"><table><caption className="visually-hidden">Trusted transaction activity</caption><thead><tr>{onToggleGrouping && <th scope="col">Group</th>}<th scope="col">Date</th><th scope="col">Activity</th>{showCategory && <th scope="col">Category</th>}<th scope="col">Direction</th><th scope="col">Amount</th>{showSource && <th scope="col">Source</th>}</tr></thead><tbody>
-          {page.items.map((transaction) => <tr key={transaction.transaction_id} tabIndex={0} aria-selected={state.selected === transaction.transaction_id} onClick={() => onSelect(transaction)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(transaction); } }}>
-            {onToggleGrouping && <td><input type="checkbox" aria-label={`Group ${transaction.description}`} checked={grouped.has(transaction.transaction_id)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === " ") event.stopPropagation(); }} onChange={() => onToggleGrouping(transaction.transaction_id)} /></td>}<td><time dateTime={transaction.transaction_date}>{transaction.transaction_date}</time></td><td><strong>{transaction.merchant ?? transaction.description}</strong><span>{transaction.description}</span></td>{showCategory && <td>{transaction.category}</td>}<td>{transaction.direction === "debit" ? "Sent" : "Received"}</td><td>{formatMoney(transaction.amount_minor, transaction.currency)}</td>{showSource && <td>{transaction.source.document}</td>}
-          </tr>)}
+          {page.items.map((transaction) => {
+            const label = transaction.merchant ?? transaction.counterparty ?? "Unresolved statement entry";
+            return <tr key={transaction.transaction_id} tabIndex={0} aria-selected={state.selected === transaction.transaction_id} onClick={() => onSelect(transaction)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(transaction); } }}>
+              {onToggleGrouping && <td><input type="checkbox" aria-label={`Group ${label}`} checked={grouped.has(transaction.transaction_id)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === " ") event.stopPropagation(); }} onChange={() => onToggleGrouping(transaction.transaction_id)} /></td>}<td><time dateTime={transaction.transaction_date}>{transaction.transaction_date}</time></td><td><strong>{label}</strong></td>{showCategory && <td>{transaction.category}</td>}<td>{transaction.direction === "debit" ? "Sent" : "Received"}</td><td>{formatMoney(transaction.amount_minor, transaction.currency)}</td>{showSource && <td>{transaction.source.document}</td>}
+            </tr>;
+          })}
         </tbody></table></div>
       )}
+      <section className="result-summary" role="region" aria-label="Result summary">
+        <p>All matching entries are summarized below.</p>
+        {lens.lens.length ? <LensSummary flows={lens.lens} /> : <p>0 matching entries.</p>}
+      </section>
       <p className="ledger-count">{page.total} trusted {page.total === 1 ? "entry" : "entries"}</p>
     </section>
   );

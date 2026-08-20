@@ -19,6 +19,7 @@ export type WorkspaceState = {
   limit?: string;
   offset?: string;
   selected?: string;
+  unresolvedGroup?: string;
 };
 
 const stateKeys = [
@@ -40,6 +41,7 @@ const stateKeys = [
   "limit",
   "offset",
   "selected",
+  "unresolved_group",
 ] as const;
 
 const fieldForKey = {
@@ -61,6 +63,7 @@ const fieldForKey = {
   limit: "limit",
   offset: "offset",
   selected: "selected",
+  unresolved_group: "unresolvedGroup",
 } as const;
 
 const views: readonly WorkspaceView[] = ["this-month", "all-activity", "people-places", "patterns", "compare", "data"];

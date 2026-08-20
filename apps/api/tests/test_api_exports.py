@@ -20,7 +20,25 @@ class _Rows:
                 source_document="-statement.csv",
                 source_ordinal=1,
                 source_text="=source",
-            )
+            ),
+            SearchRow(
+                TrustedTransaction(UUID(int=2), "AED-001", date(2026, 1, 2), "Brew Lab", "brew lab", "AED", 900, "debit"),
+                CategoryDecision(None, "Dining", "unavailable"),
+                "Brew Lab",
+                "confirmed",
+                source_document="statement.csv",
+                source_ordinal=2,
+                source_text="Brew Lab",
+            ),
+            SearchRow(
+                TrustedTransaction(UUID(int=3), "AED-001", date(2026, 1, 3), "MetroMart POS", "metromart pos", "AED", 1500, "debit"),
+                CategoryDecision(None, "Groceries", "unavailable"),
+                "MetroMart",
+                "confirmed",
+                source_document="statement.csv",
+                source_ordinal=3,
+                source_text="MetroMart POS",
+            ),
         ]
 
 
@@ -37,3 +55,16 @@ def test_csv_export_uses_trusted_scope_and_neutralizes_formula_cells(tmp_path: P
     assert "'+Groceries" in response.text
     assert "'@Metro" in response.text
     assert "'-statement.csv" in response.text
+
+
+def test_csv_export_applies_the_activity_text_query(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "spend-memory.duckdb", tmp_path / "data")
+    app.dependency_overrides[get_enrichment_repository] = _Rows
+
+    response = TestClient(app).get(
+        "/api/v1/exports/transactions.csv?account=AED-001&query=MetroMart%20POS"
+    )
+
+    assert response.status_code == 200
+    assert "MetroMart POS" in response.text
+    assert "Brew Lab" not in response.text

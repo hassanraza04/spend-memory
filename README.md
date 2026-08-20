@@ -6,49 +6,56 @@ Spend Memory turns local financial statements into a private, searchable transac
 
 This is a portfolio and learning project, not a production financial service. It has no accounts, cloud storage, bank connections, payments, analytics trackers, or remote model calls.
 
-## First run on macOS
+## Run locally with Docker
 
-Spend Memory runs locally through Docker Desktop. On a new Mac, install the
-required tools and start Docker Desktop before opening the project:
-
-```sh
-brew install uv node
-npm install --global pnpm@11.9.0
-brew install --cask docker
-open -a Docker
-```
-
-Wait for Docker Desktop to report that it is running, then confirm the setup:
+Docker Desktop is the supported way to run Spend Memory. Start Docker Desktop,
+then confirm the Docker client and Compose plugin are available:
 
 ```sh
 docker --version
 docker compose version
-uv --version
-pnpm --version
 ```
 
-If Homebrew is not installed, install it from [brew.sh](https://brew.sh) first.
+From the repository root, start the local API and web app:
+
+```sh
+docker compose up --build -d
+docker compose ps
+```
+
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Both services bind only
+to this computer. `docker compose down` stops them and keeps their local data
+for the next run.
+
+Node, pnpm, and uv are only needed for source development and checks. They are
+not Docker user prerequisites.
 
 ## Try the synthetic demo
 
-The checked-in demo is invented. It includes CSV and PDF statements, a scanned PDF for the local OCR path, known recurring payments, a duplicate candidate, and reconciliation controls.
+The checked-in demo is invented. It includes known merchants, categories,
+recurring payments, a possible duplicate, and review examples. On the first
+screen, choose **Explore the synthetic demo**.
 
-```sh
-uv sync --locked
-pnpm install --frozen-lockfile
-make dev
-```
+To reset a demo workspace, first make sure it contains no personal statement.
+Choose **Data**, then **Delete local data**, type `DELETE LOCAL DATA`, and
+start the synthetic demo again from the first screen. This permanently clears
+the local workspace. The demo action itself refuses to replace a workspace
+with a real import.
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then choose **Explore the synthetic demo**. Docker Compose binds both services to loopback only. Use `make clean-demo` to remove its local Docker volume.
+`docker compose down --volumes --remove-orphans` and `make clean-demo` also
+permanently remove the Docker volume. They remove personal statements too, if
+you imported any.
 
-If a command is missing, run the matching command from **First run on macOS**.
-If Docker is installed but unavailable, open Docker Desktop and wait for it to
-finish starting. If a previous local run is still holding a port, stop it with
-`docker compose down`, then run `make dev` again.
+## Import your own statement
 
-`make clean-demo` permanently removes all local Spend Memory data in Docker,
-including any real statements you imported. Use it only when you want a fresh
-workspace.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) and choose **Import a
+statement**. Select a supported local CSV or PDF, review its preview, then
+choose **Import selected statement**. The app reads the file from your device
+and stores it locally. It does not send it to a hosted service.
+
+If the synthetic demo is active, the browser asks you to clear its workspace
+before it makes personal import available. Clear the demo before importing a
+personal statement.
 
 ## What it does
 
@@ -117,9 +124,16 @@ PYTHONPATH=apps/api:. uv run python -m evaluations.generate --output evaluations
 
 ## Privacy model
 
-Original files, raw rows, trusted data, and corrections remain in the configured local data directory and DuckDB file. The browser keeps only small interface preferences. Parser and OCR workers have input checks and resource limits. State-changing browser requests must originate from the local web app.
+Original files, raw rows, trusted data, and corrections remain in the local
+Docker volume by default. The volume contains the configured local data
+directory and DuckDB file. For source development outside Docker, the default
+paths are `data/` for documents and `spend-memory.duckdb` for the database.
+Set `SPEND_MEMORY_DATA_DIRECTORY` and `DUCKDB_PATH` to use other local paths.
+The browser keeps only small interface preferences. Parser and OCR workers have
+input checks and resource limits. State-changing browser requests must
+originate from the local web app.
 
-Read [privacy.md](docs/privacy.md) and the [threat model](docs/threat-model.md) for the protections and their limits. Do not commit real statements, exports, screenshots, or logs.
+Read [privacy.md](docs/privacy.md) and the [threat model](docs/threat-model.md) for the protections and their limits. A future hosted demo must use synthetic data and disable imports in both its interface and API. Do not commit real statements, exports, screenshots, or logs.
 
 ## Repository structure
 

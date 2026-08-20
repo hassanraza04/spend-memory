@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from uuid import UUID
 
 from spend_memory.enrichment.models import (
     CategoryDecision,
@@ -35,6 +36,7 @@ class SearchRow:
     source_text: str = ""
     extraction_confidence: float = 0.0
     counterparty_label: str | None = None
+    merchant_id: UUID | None = None
 
 
 def parse_search_query(query: str) -> SearchQuery:
@@ -76,11 +78,25 @@ def search_transactions(
 ) -> list[SearchResult]:
     if not query.text and not _has_filter(query) and not include_all:
         return []
+    rows = list(rows)
+    group_descriptor = None
+    if query.unresolved_group is not None:
+        seed = next(
+            (
+                row for row in rows
+                if row.transaction.raw_transaction_id == query.unresolved_group
+                and row.state == "unresolved"
+            ),
+            None,
+        )
+        if seed is None:
+            return []
+        group_descriptor = seed.transaction.normalized_description
     query_normalized = normalize_descriptor(query.text)
     query_tokens = set(query_normalized.split())
     results = []
     for row in rows:
-        if not _matches(row, query):
+        if not _matches(row, query, group_descriptor):
             continue
         score = _score(row.transaction, query_normalized, query_tokens)
         if query_normalized and score == 0:
@@ -121,10 +137,10 @@ def _has_filter(query: SearchQuery) -> bool:
     return any(value is not None for name, value in vars(query).items() if name != "text")
 
 
-def _matches(row: SearchRow, query: SearchQuery) -> bool:
+def _matches(row: SearchRow, query: SearchQuery, group_descriptor: str | None) -> bool:
     transaction = row.transaction
     return (
-        (query.after is None or transaction.transaction_date > query.after)
+        (query.after is None or transaction.transaction_date >= query.after)
         and (query.before is None or transaction.transaction_date < query.before)
         and (query.account is None or _same_text(transaction.account_identity, query.account))
         and (query.currency is None or transaction.currency == query.currency)
@@ -135,6 +151,13 @@ def _matches(row: SearchRow, query: SearchQuery) -> bool:
         and (query.amount_min_minor is None or transaction.amount_minor >= query.amount_min_minor)
         and (query.amount_max_minor is None or transaction.amount_minor <= query.amount_max_minor)
         and (query.state is None or row.state == query.state)
+        and (
+            group_descriptor is None
+            or (
+                row.state == "unresolved"
+                and transaction.normalized_description == group_descriptor
+            )
+        )
     )
 
 

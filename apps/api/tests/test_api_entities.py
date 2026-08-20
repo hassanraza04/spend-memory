@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -8,8 +9,15 @@ from spend_memory.api.dependencies import (
     get_enrichment_repository,
     get_local_workspace_refresh,
 )
-from spend_memory.enrichment.models import Category, CurrencyFlow, Merchant
+from spend_memory.enrichment.models import (
+    Category,
+    CategoryDecision,
+    CurrencyFlow,
+    Merchant,
+    TrustedTransaction,
+)
 from spend_memory.enrichment.repository import CategorySummary
+from spend_memory.enrichment.search import SearchRow
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,7 @@ class _Merchant:
     method: str
     evidence: dict[str, object]
     transaction_id: UUID
+    transaction_date: date
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,10 @@ class _Recurring:
     transaction_ids: tuple[UUID, ...]
     expected_next_start: str
     expected_next_end: str
+    currency: str = "AED"
+    amount_min_minor: int = 2999
+    amount_max_minor: int = 3050
+    observation_count: int = 3
 
 
 @dataclass(frozen=True)
@@ -44,6 +57,10 @@ class _Review:
     confidence: float
     evidence: dict[str, object]
     transaction_ids: tuple[UUID, ...]
+    currency: str = "AED"
+    amount_minor: int = 12500
+    observation_count: int = 2
+    date_distance_days: int | None = 0
 
 
 class _Entities:
@@ -52,7 +69,10 @@ class _Entities:
         self.overrides: list[tuple[UUID, UUID]] = []
 
     def list_merchant_evidence(self) -> list[_Merchant]:
-        return [_Merchant(UUID(int=1), "MetroMart", "suggested", 0.8, "lexical", {"score": 0.8}, UUID(int=10))]
+        return [
+            _Merchant(UUID(int=1), "MetroMart", "suggested", 0.8, "lexical", {"score": 0.8}, UUID(int=10), date(2026, 1, 1)),
+            _Merchant(UUID(int=5), "MetroMart February", "suggested", 0.7, "lexical", {"score": 0.7}, UUID(int=11), date(2026, 2, 1)),
+        ]
 
     def list_category_summaries(self, currency: str | None = None) -> list[CategorySummary]:
         assert currency in {None, "AED"}
@@ -63,6 +83,9 @@ class _Entities:
 
     def list_review_evidence(self) -> list[_Review]:
         return [_Review(UUID(int=4), "duplicate", "candidate", 1.0, {"date_distance_days": 0}, (UUID(int=14), UUID(int=15)))]
+
+    def list_counterparty_assignments(self) -> dict[UUID, UUID]:
+        return {}
 
     def get_merchant(self, merchant_id: UUID) -> Merchant | None:
         return Merchant(merchant_id, "MetroMart") if merchant_id == UUID(int=1) else None
@@ -78,6 +101,119 @@ class _Entities:
 
     def set_trusted_transaction_category_override(self, transaction_id: UUID, category_id: UUID) -> None:
         self.overrides.append((transaction_id, category_id))
+
+
+def _row(
+    identifier: int,
+    transaction_date: date,
+    description: str,
+    amount_minor: int,
+    *,
+    merchant_name: str | None = None,
+    state: str = "unresolved",
+    counterparty_label: str | None = None,
+    category_id: UUID | None = None,
+    category_label: str = "uncategorized",
+) -> SearchRow:
+    return SearchRow(
+        TrustedTransaction(
+            UUID(int=identifier), "Everyday", transaction_date, description,
+            description.casefold(), "AED", amount_minor, "debit",
+        ),
+        CategoryDecision(
+            category_id,
+            category_label,
+            "confirmed" if category_id is not None else "unavailable",
+        ),
+        merchant_name,
+        state,
+        counterparty_label=counterparty_label,
+    )
+
+
+class _GroupedEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [
+            _row(10, date(2026, 1, 1), "METROMART ONE", 700, merchant_name="MetroMart", state="confirmed", category_id=UUID(int=2), category_label="Groceries"),
+            _row(12, date(2026, 1, 15), "METROMART TWO", 500, merchant_name="MetroMart", state="confirmed", category_id=UUID(int=2), category_label="Groceries"),
+            _row(13, date(2026, 1, 20), "BANK TRANSFER 91", 300),
+            _row(14, date(2026, 1, 21), "BANK TRANSFER 91", 400),
+            _row(15, date(2026, 2, 1), "METROMART FEB", 900, merchant_name="MetroMart", state="confirmed"),
+        ]
+
+    def list_merchant_evidence(self) -> list[_Merchant]:
+        return [
+            _Merchant(UUID(int=1), "MetroMart", "confirmed", 1.0, "confirmed_alias", {}, UUID(int=identifier), transaction_date)
+            for identifier, transaction_date in (
+                (10, date(2026, 1, 1)),
+                (12, date(2026, 1, 15)),
+                (15, date(2026, 2, 1)),
+            )
+        ]
+
+
+class _UnavailableGroups(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        raise RuntimeError("trusted_mart_unavailable")
+
+
+class _EmptyGroups(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return []
+
+
+class _PeopleEntities(_GroupedEntities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [
+            _row(
+                20,
+                date(2026, 1, 7),
+                "TRANSFER REFERENCE 7",
+                600,
+                counterparty_label="Rina",
+            )
+        ]
+
+    def list_counterparty_assignments(self) -> dict[UUID, UUID]:
+        return {UUID(int=20): UUID(int=30)}
+
+
+class _ScopedEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [
+            _row(
+                identifier,
+                transaction_date,
+                f"GROCERY {identifier}",
+                100,
+                category_id=UUID(int=2),
+                category_label="Groceries",
+            )
+            for identifier, transaction_date in (
+                (11, date(2026, 1, 1)),
+                (12, date(2026, 1, 10)),
+                (13, date(2026, 1, 20)),
+                (14, date(2026, 1, 25)),
+                (15, date(2026, 2, 1)),
+            )
+        ]
+
+
+class _AprilRecurringEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [_row(13, date(2026, 4, 3), "STREAMBOX APRIL", 2999)]
+
+
+class _TwoUnresolvedEntities(_Entities):
+    def list_search_rows(self) -> list[SearchRow]:
+        return [
+            _row(21, date(2026, 4, 1), "PRIVATE ALIAS A", 100),
+            _row(22, date(2026, 4, 2), "PRIVATE ALIAS A", 200),
+            _row(23, date(2026, 4, 3), "PRIVATE ALIAS B", 300),
+        ]
+
+    def list_merchant_evidence(self) -> list[_Merchant]:
+        return []
 
 
 class _Refresh:
@@ -110,6 +246,14 @@ def test_entities_expose_candidate_evidence_without_changing_transactions(tmp_pa
         "00000000-0000-0000-0000-00000000000d",
     ]
     assert review.json()["items"][0]["kind"] == "duplicate"
+    assert recurring.json()["items"][0]["currency"] == "AED"
+    assert recurring.json()["items"][0]["amount_min_minor"] == 2999
+    assert recurring.json()["items"][0]["amount_max_minor"] == 3050
+    assert recurring.json()["items"][0]["observation_count"] == 3
+    assert review.json()["items"][0]["currency"] == "AED"
+    assert review.json()["items"][0]["amount_minor"] == 12500
+    assert review.json()["items"][0]["observation_count"] == 2
+    assert review.json()["items"][0]["date_distance_days"] == 0
     assert recurring.json()["items"][0]["expected_next_start"] == "2026-04-01"
     assert repository.aliases == repository.overrides == []
 
@@ -121,6 +265,174 @@ def test_entity_collections_have_typed_filters_and_sorting(tmp_path: Path) -> No
 
     assert response.status_code == 200
     assert response.json()["items"][0]["status"] == "suggested"
+
+
+def test_entity_collections_keep_the_start_date_and_exclude_the_end_date(tmp_path: Path) -> None:
+    response = _client(tmp_path, _Entities()).get(
+        "/api/v1/merchants?after=2026-01-01&before=2026-02-01"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["merchant_name"] == "MetroMart"
+
+
+def test_people_places_groups_confirmed_merchants_and_keeps_unresolved_labels_separate(
+    tmp_path: Path,
+) -> None:
+    response = _client(tmp_path, _GroupedEntities()).get(
+        "/api/v1/people-places?after=2026-01-01&before=2026-02-01&query=metromart"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "key": "merchant:00000000-0000-0000-0000-000000000001",
+                "label": "MetroMart",
+                "kind": "place",
+                "status": "confirmed",
+                "transactionCount": 2,
+                "lastActivityDate": "2026-01-15",
+                "flows": [
+                    {
+                        "currency": "AED",
+                        "sent_minor": 1200,
+                        "received_minor": 0,
+                        "net_minor": -1200,
+                        "transaction_count": 2,
+                    }
+                ],
+                "recentTransactionIds": [
+                    "00000000-0000-0000-0000-00000000000c",
+                    "00000000-0000-0000-0000-00000000000a",
+                ],
+            }
+        ],
+        "limit": 50,
+        "offset": 0,
+        "total": 1,
+    }
+
+    all_january = _client(tmp_path, _GroupedEntities()).get(
+        "/api/v1/people-places?after=2026-01-01&before=2026-02-01"
+    )
+    assert [item["kind"] for item in all_january.json()["items"]] == ["place", "unresolved"]
+    unresolved = all_january.json()["items"][1]
+    assert unresolved["label"] == "Unresolved statement label"
+    assert unresolved["transactionCount"] == 2
+    assert "description" not in unresolved
+    assert "descriptor" not in unresolved
+
+
+def test_people_places_returns_empty_or_established_unavailable_response(tmp_path: Path) -> None:
+    empty = _client(tmp_path, _EmptyGroups()).get("/api/v1/people-places")
+    unavailable = _client(tmp_path, _UnavailableGroups()).get("/api/v1/people-places")
+
+    assert empty.status_code == 200
+    assert empty.json()["items"] == []
+    assert empty.json()["total"] == 0
+    assert unavailable.status_code == 503
+    assert unavailable.json()["error"]["code"] == "trusted_records_unavailable"
+
+
+def test_people_places_only_calls_an_assigned_counterparty_a_person(tmp_path: Path) -> None:
+    response = _client(tmp_path, _PeopleEntities()).get("/api/v1/people-places")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["kind"] == "person"
+    assert response.json()["items"][0]["label"] == "Rina"
+    assert response.json()["items"][0]["key"] == (
+        "counterparty:00000000-0000-0000-0000-00000000001e"
+    )
+
+
+def test_people_places_honours_every_activity_filter(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GroupedEntities())
+
+    amount = client.get(
+        "/api/v1/people-places?amount_min_minor=600&amount_max_minor=800"
+    ).json()["items"]
+    merchant = client.get("/api/v1/people-places?merchant=MetroMart").json()["items"]
+    category = client.get("/api/v1/people-places?category=Groceries").json()["items"]
+    state = client.get("/api/v1/people-places?state=unresolved").json()["items"]
+    counterparty = _client(tmp_path, _PeopleEntities()).get(
+        "/api/v1/people-places?counterparty=Rina"
+    ).json()["items"]
+
+    assert [(item["kind"], item["transactionCount"]) for item in amount] == [("place", 1)]
+    assert [(item["kind"], item["transactionCount"]) for item in merchant] == [("place", 3)]
+    assert [(item["kind"], item["transactionCount"]) for item in category] == [("place", 2)]
+    assert [(item["kind"], item["transactionCount"]) for item in state] == [("unresolved", 2)]
+    assert [(item["kind"], item["transactionCount"]) for item in counterparty] == [("person", 1)]
+
+
+def test_people_places_navigation_uses_merchant_aliases_and_one_opaque_unresolved_group(
+    tmp_path: Path,
+) -> None:
+    alias_activity = _client(tmp_path, _GroupedEntities()).get(
+        "/api/v1/transactions?merchant=MetroMart"
+    )
+    assert alias_activity.status_code == 200
+    assert {item["description"] for item in alias_activity.json()["items"]} == {
+        "METROMART ONE",
+        "METROMART TWO",
+        "METROMART FEB",
+    }
+
+    client = _client(tmp_path, _TwoUnresolvedEntities())
+    groups = client.get("/api/v1/people-places").json()["items"]
+    assert len(groups) == 2
+    two_item_group = next(item for item in groups if item["transactionCount"] == 2)
+    token = two_item_group["key"].removeprefix("unresolved:")
+    activity = client.get(f"/api/v1/transactions?unresolved_group={token}")
+
+    assert activity.status_code == 200
+    assert activity.json()["total"] == 2
+    assert {item["description"] for item in activity.json()["items"]} == {
+        "PRIVATE ALIAS A"
+    }
+
+
+def test_recurring_scope_keeps_history_when_one_candidate_member_is_in_april(
+    tmp_path: Path,
+) -> None:
+    response = _client(tmp_path, _AprilRecurringEntities()).get(
+        "/api/v1/recurring?after=2026-04-01&before=2026-05-01"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["label"] == "StreamBox"
+
+
+def test_categories_and_candidates_use_the_same_complete_scoped_evidence(
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path, _ScopedEntities())
+    scope = "?after=2026-01-01&before=2026-02-01"
+
+    categories = client.get(f"/api/v1/categories{scope}")
+    recurring = client.get(f"/api/v1/recurring{scope}")
+    review = client.get(f"/api/v1/review{scope}")
+
+    assert categories.json()["items"] == [
+        {
+            "category_id": "00000000-0000-0000-0000-000000000002",
+            "label": "Groceries",
+            "lens": [
+                {
+                    "currency": "AED",
+                    "sent_minor": 400,
+                    "received_minor": 0,
+                    "net_minor": -400,
+                    "transaction_count": 4,
+                }
+            ],
+        }
+    ]
+    assert recurring.json()["total"] == 1
+    assert review.json()["items"] == []
 
 
 def test_entity_corrections_only_write_local_annotations(tmp_path: Path) -> None:

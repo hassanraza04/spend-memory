@@ -40,6 +40,7 @@ class MerchantEvidence:
     confidence: float
     method: str
     evidence: dict[str, str | int | float]
+    transaction_date: date
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,10 @@ class RecurringEvidence:
     transaction_ids: tuple[UUID, ...]
     expected_next_start: date
     expected_next_end: date
+    currency: str
+    amount_min_minor: int
+    amount_max_minor: int
+    observation_count: int
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,10 @@ class ReviewEvidence:
     confidence: float
     evidence: dict[str, str | int | float]
     transaction_ids: tuple[UUID, ...]
+    currency: str
+    amount_minor: int
+    observation_count: int
+    date_distance_days: int | None
 
 
 class EnrichmentRepository:
@@ -200,6 +209,21 @@ class EnrichmentRepository:
             ).fetchall()
         return [Counterparty(*row) for row in rows]
 
+    def list_counterparty_assignments(self) -> dict[UUID, UUID]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT assignments.raw_transaction_id, assignments.counterparty_id
+                    FROM transaction_counterparty_assignments AS assignments
+                    JOIN analytics.mart_transactions AS transactions
+                        USING (raw_transaction_id)
+                    """
+                ).fetchall()
+        except duckdb.CatalogException as error:
+            raise RuntimeError("trusted_mart_unavailable") from error
+        return dict(rows)
+
     def list_counterparty_transactions(
         self, counterparty_id: UUID
     ) -> list[TrustedTransaction]:
@@ -261,7 +285,7 @@ class EnrichmentRepository:
                         transactions.currency, transactions.amount_minor,
                         transactions.direction, transactions.category_id,
                         coalesce(categories.category_label, 'uncategorized'),
-                        merchants.merchant_name,
+                        annotations.merchant_id, merchants.merchant_name,
                         coalesce(annotations.resolution_status, 'unresolved'),
                         transactions.original_filename, transactions.source_ordinal,
                         transactions.source_page, transactions.source_row,
@@ -295,10 +319,12 @@ class EnrichmentRepository:
                 source_text=source_text,
                 extraction_confidence=extraction_confidence,
                 counterparty_label=counterparty_label,
+                merchant_id=merchant_id,
             )
             for (
                 raw_transaction_id, account_identity, transaction_date, description, currency,
-                amount_minor, direction, category_id, category_label, merchant_name, state,
+                amount_minor, direction, category_id, category_label, merchant_id,
+                merchant_name, state,
                 source_document, source_ordinal, source_page, source_row, source_text,
                 extraction_confidence, counterparty_label,
             ) in rows
@@ -543,6 +569,52 @@ class EnrichmentRepository:
                 direction,
             ) in rows
         ]
+
+    def workspace_context(self) -> dict[str, object]:
+        try:
+            with duckdb.connect(str(self.database_path), read_only=True) as connection:
+                first_date, last_date = connection.execute(
+                    "SELECT min(transaction_date), max(transaction_date) FROM analytics.mart_transactions"
+                ).fetchone()
+                rows = connection.execute(
+                    """
+                    SELECT account_identity, currency
+                    FROM analytics.mart_transactions
+                    GROUP BY account_identity, currency
+                    ORDER BY account_identity, currency
+                    """
+                ).fetchall()
+        except duckdb.CatalogException:
+            return {
+                "first_transaction_date": None,
+                "last_transaction_date": None,
+                "latest_month_start": None,
+                "latest_month_end": None,
+                "accounts": (),
+            }
+        accounts: dict[str, list[str]] = {}
+        for account, currency in rows:
+            accounts.setdefault(account, []).append(currency)
+        latest_month_start = None if last_date is None else last_date.replace(day=1)
+        latest_month_end = (
+            None
+            if latest_month_start is None
+            else date(
+                latest_month_start.year + (latest_month_start.month == 12),
+                latest_month_start.month % 12 + 1,
+                1,
+            )
+        )
+        return {
+            "first_transaction_date": first_date,
+            "last_transaction_date": last_date,
+            "latest_month_start": latest_month_start,
+            "latest_month_end": latest_month_end,
+            "accounts": tuple(
+                {"account": account, "currencies": tuple(currencies)}
+                for account, currencies in accounts.items()
+            ),
+        }
 
     def replace_merchant_annotations(
         self, matches: dict[UUID, MerchantMatch]
@@ -822,7 +894,8 @@ class EnrichmentRepository:
                     """
                     SELECT transactions.raw_transaction_id, annotations.merchant_id AS merchant_id,
                         merchants.merchant_name, annotations.resolution_status,
-                        annotations.confidence, annotations.method, annotations.evidence_json
+                        annotations.confidence, annotations.method, annotations.evidence_json,
+                        transactions.transaction_date
                     FROM analytics.mart_transactions AS transactions
                     JOIN transaction_merchant_annotations AS annotations
                         USING (raw_transaction_id)
@@ -836,9 +909,12 @@ class EnrichmentRepository:
         return [
             MerchantEvidence(
                 transaction_id, merchant_id, merchant_name, status, confidence, method,
-                json.loads(evidence),
+                json.loads(evidence), transaction_date,
             )
-            for transaction_id, merchant_id, merchant_name, status, confidence, method, evidence in rows
+            for (
+                transaction_id, merchant_id, merchant_name, status, confidence, method,
+                evidence, transaction_date,
+            ) in rows
         ]
 
     def list_recurring_evidence(self) -> list[RecurringEvidence]:
@@ -846,13 +922,17 @@ class EnrichmentRepository:
             with duckdb.connect(str(self.database_path)) as connection:
                 candidates = connection.execute(
                     """
-                    SELECT candidates.recurring_candidate_id, candidates.normalized_descriptor,
+                    SELECT candidates.recurring_candidate_id,
+                        coalesce(merchants.merchant_name, 'Unresolved statement label'),
                         candidates.cadence, candidates.status, candidates.confidence,
                         candidates.evidence_json, candidates.expected_next_start,
-                        candidates.expected_next_end
+                        candidates.expected_next_end, candidates.currency,
+                        candidates.amount_min_minor, candidates.amount_max_minor
                     FROM recurring_candidates AS candidates
                     JOIN recurring_candidate_state AS state
                         ON state.active_generation_id = candidates.generation_id
+                    LEFT JOIN merchants
+                        ON merchants.merchant_id = candidates.merchant_id
                     ORDER BY candidates.first_transaction_date, candidates.recurring_candidate_id
                     """
                 ).fetchall()
@@ -876,10 +956,13 @@ class EnrichmentRepository:
             RecurringEvidence(
                 candidate_id, label, cadence, status, confidence, json.loads(evidence),
                 memberships[candidate_id], expected_next_start, expected_next_end,
+                currency, amount_min_minor, amount_max_minor,
+                len(memberships[candidate_id]),
             )
             for (
                 candidate_id, label, cadence, status, confidence, evidence,
-                expected_next_start, expected_next_end,
+                expected_next_start, expected_next_end, currency,
+                amount_min_minor, amount_max_minor,
             ) in candidates
         ]
 
@@ -902,7 +985,8 @@ class EnrichmentRepository:
                 unusual = connection.execute(
                     """
                     SELECT candidates.unusual_candidate_id, candidates.confidence,
-                        candidates.evidence_json, candidates.raw_transaction_id
+                        candidates.evidence_json, candidates.raw_transaction_id,
+                        transactions.currency, transactions.amount_minor
                     FROM unusual_spend_candidates AS candidates
                     JOIN analytics.mart_transactions AS transactions
                         USING (raw_transaction_id)
@@ -911,13 +995,26 @@ class EnrichmentRepository:
                 ).fetchall()
         except duckdb.CatalogException as error:
             raise RuntimeError("trusted_mart_unavailable") from error
-        return [
-            ReviewEvidence(candidate_id, "duplicate", "candidate", confidence, json.loads(evidence), (first_id, second_id))
-            for candidate_id, confidence, evidence, first_id, second_id in duplicates
-        ] + [
-            ReviewEvidence(candidate_id, "unusual_spend", "candidate", confidence, json.loads(evidence), (transaction_id,))
-            for candidate_id, confidence, evidence, transaction_id in unusual
-        ]
+        items = []
+        for candidate_id, confidence, evidence_json, first_id, second_id in duplicates:
+            evidence = json.loads(evidence_json)
+            items.append(ReviewEvidence(
+                candidate_id, "duplicate", "candidate", confidence, evidence,
+                (first_id, second_id), str(evidence["currency"]),
+                int(evidence["amount_minor"]), 2,
+                int(evidence["date_distance_days"]),
+            ))
+        for (
+            candidate_id, confidence, evidence_json, transaction_id,
+            currency, amount_minor,
+        ) in unusual:
+            evidence = json.loads(evidence_json)
+            items.append(ReviewEvidence(
+                candidate_id, "unusual_spend", "candidate", confidence, evidence,
+                (transaction_id,), currency, amount_minor,
+                int(evidence["sample_size"]) + 1, None,
+            ))
+        return items
 
     def list_period_rows(
         self, start: date, end: date, account: str, currency: str
@@ -944,7 +1041,7 @@ class EnrichmentRepository:
                             ON state.active_generation_id = candidates.generation_id
                         GROUP BY members.raw_transaction_id
                     ) AS recurring USING (raw_transaction_id)
-                    WHERE transactions.transaction_date > ? AND transactions.transaction_date < ?
+                    WHERE transactions.transaction_date >= ? AND transactions.transaction_date < ?
                         AND transactions.account_identity = ? AND transactions.currency = ?
                     ORDER BY transactions.transaction_date, transactions.raw_transaction_id
                     """,

@@ -5,7 +5,7 @@ test("imports and reconciles a synthetic CSV without duplicating a retry", async
   await freshRecord();
   const csv = fixturePath("source", "aed_january_2026.csv");
   await importStatement(page, csv, "?after=2026-01-01&before=2026-02-01");
-  await expect(page.getByText(/17 trusted entries/)).toBeVisible();
+  await expect(page.getByText(/18 trusted entries/)).toBeVisible();
 
   const retry = await page.request.post("/api/v1/imports", {
     multipart: { file: { name: "aed_january_2026.csv", mimeType: "text/csv", buffer: readFileSync(csv) } },
